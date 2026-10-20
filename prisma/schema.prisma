@@ -1,0 +1,657 @@
+// =============================================================================
+//  HRM Kassa — databaseschema
+// =============================================================================
+//
+//  Uitgangspunten (belangrijk voor de boekhouder):
+//
+//  1. ALLE bedragen staan in hele EUROCENTEN (Int). Nooit Float/Decimal-rekenen
+//     in JavaScript: €12,34 wordt 1234. Zo ontstaan er geen afrondingsverschillen
+//     tussen bon, Z-rapport, export en Mollie.
+//  2. Btw-percentages staan in BASISPUNTEN (Int): 21% = 2100, 9% = 900, 0% = 0.
+//  3. Bonregels en btw-regels zijn SNAPSHOTS: naam, prijs, btw-tarief en
+//     grootboekrekening worden bij het aanslaan gekopieerd. Een productprijs of
+//     btw-tarief later wijzigen verandert nooit een oude bon.
+//  4. Afgeronde bonnen (status PAID) zijn onwijzigbaar. Correctie gaat alleen via
+//     een creditbon (type CREDIT) die naar de originele bon verwijst.
+//  5. Bonnummers (BON-2026-00001) en Z-nummers (Z-2026-001) komen uit
+//     NumberSequence en zijn doorlopend zonder gaten. Een bon die na nummering
+//     toch niet wordt afgerekend blijft bestaan met status VOIDED (+ reden),
+//     zodat elk nummer verantwoord is.
+//  6. Elke kasladeopening, kasmutatie, prijswijziging en Mollie-actie komt in
+//     AuditLog.
+//
+//  Database: SQLite voor lokaal gebruik op de kassa-pc. Overstappen naar
+//  PostgreSQL (Supabase) = alleen `provider` en `DATABASE_URL` aanpassen.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+//  Enums
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  MEDEWERKER // afrekenen, parkeren, kasmutaties
+  MANAGER // + retouren, kortingen boven limiet, dagafsluiting
+  ADMIN // + producten, instellingen, exports
+}
+
+enum OrderType {
+  SALE // gewone verkoop
+  CREDIT // creditbon / retour (bedragen negatief)
+}
+
+enum OrderStatus {
+  OPEN // wordt aangeslagen, nog geen bonnummer
+  PARKED // geparkeerd, nog geen bonnummer
+  PENDING_PAYMENT // bonnummer toegekend, wacht op (volledige) betaling
+  PAID // afgerond en ONWIJZIGBAAR
+  VOIDED // genummerd maar nooit afgerekend (bijv. klant liep weg) — blijft zichtbaar
+}
+
+enum DiscountType {
+  PERCENT // waarde in basispunten: 10% = 1000
+  AMOUNT // waarde in centen
+}
+
+enum PaymentMethod {
+  CASH
+  MOLLIE // Mollie Tap to Pay op telefoon van medewerker
+}
+
+/// Hoe de pinbetaling op de telefoon terechtkwam.
+enum MollieMode {
+  API // A: kassa-pc maakt betaling aan via Mollie API → verschijnt op telefoon
+  PUSH // B: medewerker start betaling vanaf eigen telefoon (companion web-app)
+  MANUAL // C: bedrag zelf ingetikt in Mollie Tap, daarna handmatig bevestigd
+}
+
+enum PaymentStatus {
+  PENDING // wacht op Mollie / klant
+  PAID
+  FAILED
+  CANCELED
+  EXPIRED
+}
+
+enum CashMovementType {
+  OPENING_FLOAT // beginsaldo bij dagstart
+  SALE // contante ontvangst (netto: gegeven − wisselgeld)
+  REFUND // contant terugbetaald bij creditbon (negatief)
+  CASH_IN // wisselgeld bijgevuld (positief)
+  CASH_OUT // afgeroomd naar kluis (negatief)
+  NO_SALE // lade geopend zonder verkoop (bedrag 0, reden verplicht)
+}
+
+enum BusinessDayStatus {
+  OPEN
+  CLOSED // na Z-rapport: geen bonnen of kasmutaties meer mogelijk
+}
+
+enum ReconciliationStatus {
+  MATCHED // kassa en Mollie sluiten exact
+  MISMATCH // er zijn verschillen
+  ERROR // Mollie API niet bereikbaar o.i.d.
+}
+
+enum ReconciliationItemType {
+  MATCHED // kassa-betaling ↔ Mollie-transactie gekoppeld
+  MATCHED_FUZZY // handmatige (modus C) betaling gekoppeld op bedrag + telefoon + tijd
+  AMOUNT_MISMATCH // gekoppeld, maar bedrag wijkt af (verkeerd getikt)
+  ONLY_IN_POS // in kassa als betaald, maar géén Mollie-transactie (!)
+  ONLY_IN_MOLLIE // wel gepind, geen bon aangeslagen (!)
+  REFUND_MATCHED
+  REFUND_ONLY_IN_POS
+  REFUND_ONLY_IN_MOLLIE
+}
+
+// -----------------------------------------------------------------------------
+//  Medewerkers
+// -----------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  /// scrypt-hash van de 4-cijferige pincode. Null = wisselen zonder pincode.
+  pinHash   String?
+  role      UserRole @default(MEDEWERKER)
+  /// Kleur van de knop in de medewerker-snelwissel (bijv. "#2563eb")
+  color     String   @default("#2563eb")
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+
+  /// Mollie terminal-ID van de Tap to Pay-telefoon van deze medewerker
+  /// (term_xxx, zie GET /v2/terminals). Nodig voor modus A en B en om
+  /// handmatige (modus C) betalingen aan de juiste telefoon te koppelen.
+  mollieTerminalId String? @unique
+  /// Vrije omschrijving, bijv. "Samsung A54 van Sanne"
+  phoneLabel       String?
+
+  /// Max korting (basispunten) zonder manager. Null = rolstandaard.
+  maxDiscountBp Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ordersCreated     Order[]                    @relation("OrderCashier")
+  ordersVoided      Order[]                    @relation("OrderVoidedBy")
+  payments          Payment[]                  @relation("PaymentEmployee")
+  paymentsConfirmed Payment[]                  @relation("PaymentConfirmedBy")
+  cashMovements     CashMovement[]
+  daysOpened        BusinessDay[]              @relation("DayOpenedBy")
+  daysClosed        BusinessDay[]              @relation("DayClosedBy")
+  zReports          ZReport[]
+  zReportMollie     ZReportMollieLine[]
+  reconItems        MollieReconciliationItem[]
+  auditLogs         AuditLog[]
+}
+
+// -----------------------------------------------------------------------------
+//  Grootboek, btw en instellingen
+// -----------------------------------------------------------------------------
+
+/// Instelbare grootboekrekeningen (code = rekeningnummer van de boekhouder).
+model LedgerAccount {
+  code    String  @id // "1000", "1150", "8000", ...
+  name    String
+  /// Functie in de kassa, zodat code wijzigbaar blijft zonder logica te breken.
+  /// CASH, MOLLIE_CLEARING, REVENUE, VAT_PAYABLE, CASH_DIFFERENCE, BANK,
+  /// PAYMENT_FEES, VAT_RECEIVABLE, CASH_TRANSFER
+  purpose String
+  active  Boolean @default(true)
+
+  vatRatesRevenue VatRate[] @relation("VatRevenueAccount")
+  vatRatesPayable VatRate[] @relation("VatPayableAccount")
+}
+
+model VatRate {
+  id                 String  @id @default(cuid())
+  /// HOOG / LAAG / NUL — gebruikt in exports en aangifte-rubrieken
+  code               String  @unique
+  name               String // "Hoog (21%)"
+  rateBp             Int // 2100 = 21%
+  revenueAccountCode String
+  vatAccountCode     String?
+  active             Boolean @default(true)
+
+  revenueAccount LedgerAccount  @relation("VatRevenueAccount", fields: [revenueAccountCode], references: [code])
+  vatAccount     LedgerAccount? @relation("VatPayableAccount", fields: [vatAccountCode], references: [code])
+  products       Product[]
+}
+
+/// Sleutel/waarde-instellingen (kasladecode, baudrate, Mollie-modus, ...).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Doorlopende nummering zonder gaten. key = "BON-2026", "CREDIT-2026", "Z-2026".
+model NumberSequence {
+  key  String @id
+  last Int    @default(0)
+}
+
+// -----------------------------------------------------------------------------
+//  Assortiment (geen barcodescanner: zoeken + favorieten + categorietegels)
+// -----------------------------------------------------------------------------
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  color     String    @default("#64748b")
+  sortOrder Int       @default(0)
+  active    Boolean   @default(true)
+  products  Product[]
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  name           String
+  /// Korte naam voor de tegel op het touchscreen
+  shortName      String?
+  /// Eigen artikelcode om snel op te zoeken (optioneel)
+  sku            String?  @unique
+  categoryId     String?
+  /// Verkoopprijs INCLUSIEF btw, in centen
+  priceInclCents Int
+  vatRateId      String
+  /// Bedrag vrij in te voeren bij aanslaan (bijv. "Diversen", cadeaubon)
+  openPrice      Boolean  @default(false)
+  /// Als favoriet bovenaan het kassascherm
+  favorite       Boolean  @default(false)
+  color          String?
+  sortOrder      Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  category   Category?   @relation(fields: [categoryId], references: [id])
+  vatRate    VatRate     @relation(fields: [vatRateId], references: [id])
+  orderLines OrderLine[]
+
+  @@index([categoryId, active, sortOrder])
+}
+
+// -----------------------------------------------------------------------------
+//  Kassadag
+// -----------------------------------------------------------------------------
+
+model BusinessDay {
+  id                String            @id @default(cuid())
+  /// Kalenderdag in Europe/Amsterdam, "2026-10-20"
+  date              String            @unique
+  status            BusinessDayStatus @default(OPEN)
+  openingFloatCents Int
+  openedById        String
+  openedAt          DateTime          @default(now())
+  closedById        String?
+  closedAt          DateTime?
+
+  openedBy        User                   @relation("DayOpenedBy", fields: [openedById], references: [id])
+  closedBy        User?                  @relation("DayClosedBy", fields: [closedById], references: [id])
+  orders          Order[]
+  cashMovements   CashMovement[]
+  zReport         ZReport?
+  reconciliations MollieReconciliation[]
+}
+
+// -----------------------------------------------------------------------------
+//  Bonnen
+// -----------------------------------------------------------------------------
+
+model Order {
+  id            String      @id @default(cuid())
+  /// "BON-2026-00001" of "CREDIT-2026-00001". Wordt toegekend bij "Afrekenen".
+  number        String?     @unique
+  type          OrderType   @default(SALE)
+  status        OrderStatus @default(OPEN)
+  businessDayId String
+  /// Medewerker die de bon aanslaat
+  cashierId     String
+
+  /// Label bij parkeren, bijv. "Klant met rode jas"
+  parkedLabel String?
+  note        String?
+
+  /// Korting op de hele bon (wordt naar rato over regels verdeeld)
+  discountType  DiscountType?
+  discountValue Int?
+
+  /// Totalen (snapshot, in centen). Bij CREDIT negatief.
+  subtotalExclCents Int @default(0)
+  vatCents          Int @default(0)
+  totalInclCents    Int @default(0)
+  discountCents     Int @default(0)
+
+  /// Creditbon verwijst naar de originele bon
+  creditOfOrderId String?
+
+  voidReason String?
+  voidedById String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  /// Moment van bonnummer-toekenning
+  numberedAt DateTime?
+  paidAt     DateTime?
+
+  businessDay   BusinessDay    @relation(fields: [businessDayId], references: [id])
+  cashier       User           @relation("OrderCashier", fields: [cashierId], references: [id])
+  voidedBy      User?          @relation("OrderVoidedBy", fields: [voidedById], references: [id])
+  creditOf      Order?         @relation("CreditNote", fields: [creditOfOrderId], references: [id])
+  creditNotes   Order[]        @relation("CreditNote")
+  lines         OrderLine[]
+  vatLines      OrderVatLine[]
+  payments      Payment[]
+  cashMovements CashMovement[]
+
+  @@index([businessDayId, status])
+  @@index([status])
+}
+
+model OrderLine {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String?
+  position  Int
+
+  // --- snapshot op moment van aanslaan ---
+  description        String
+  quantity           Int // negatief op creditbon
+  unitPriceInclCents Int
+  vatCode            String // HOOG / LAAG / NUL
+  vatRateBp          Int
+  revenueAccountCode String
+  vatAccountCode     String?
+
+  /// Regelkorting (centen, incl. btw, positief getal)
+  lineDiscountCents  Int     @default(0)
+  /// Aandeel van de bonkorting (centen, incl. btw)
+  orderDiscountCents Int     @default(0)
+  note               String?
+
+  /// Uitkomsten (centen)
+  totalInclCents Int
+  vatCents       Int
+  totalExclCents Int
+
+  /// Bij creditbon: welke regel van de originele bon wordt teruggenomen
+  creditOfLineId String?
+
+  order    Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product  Product?    @relation(fields: [productId], references: [id])
+  creditOf OrderLine?  @relation("LineCredit", fields: [creditOfLineId], references: [id])
+  credits  OrderLine[] @relation("LineCredit")
+
+  @@index([orderId])
+}
+
+/// Btw-specificatie per bon per tarief (berekend over het totaal per tarief,
+/// niet per regel opgeteld — zo rekent ook de Belastingdienst).
+model OrderVatLine {
+  id                 String  @id @default(cuid())
+  orderId            String
+  vatCode            String
+  vatRateBp          Int
+  revenueAccountCode String
+  vatAccountCode     String?
+  totalInclCents     Int
+  vatCents           Int
+  totalExclCents     Int
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, vatCode])
+}
+
+// -----------------------------------------------------------------------------
+//  Betalingen (split-payment = meerdere Payment-rijen per bon)
+// -----------------------------------------------------------------------------
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+  /// Bedrag dat deze betaling afdekt (centen). Negatief = terugbetaling.
+  amountCents Int
+  /// Medewerker die de betaling afhandelt. Bij MOLLIE: eigenaar van de telefoon.
+  employeeId  String
+
+  // --- Contant ---
+  /// Door klant gegeven bedrag (bijv. 5000 bij €50-biljet)
+  tenderedCents Int?
+  /// Wisselgeld terug
+  changeCents   Int?
+
+  // --- Mollie ---
+  mollieMode         MollieMode?
+  /// tr_xxx — uniek, voorkomt dubbele verwerking van webhooks
+  molliePaymentId    String?     @unique
+  /// re_xxx bij terugbetaling via Mollie
+  mollieRefundId     String?     @unique
+  /// Terminal (telefoon) waarop is gepind
+  mollieTerminalId   String?
+  /// Ruwe Mollie-status (open, pending, paid, failed, canceled, expired)
+  mollieStatus       String?
+  mollieStatusReason String?
+  /// Laatste 4 cijfers kaart, kaartlabel (voor terugzoeken bij klachten)
+  cardLast4          String?
+  cardLabel          String?
+  /// Bij modus C: wie bevestigde "betaling geslaagd op telefoon"
+  confirmedById      String?
+  confirmedAt        DateTime?
+
+  // --- Reconciliatie / uitbetaling ---
+  /// Gevonden via dagcontrole (vooral bij modus C, waar we eerst geen tr_ hebben)
+  reconciledMolliePaymentId String?
+  reconciledAt              DateTime?
+  /// stl_xxx — in welke Mollie-uitbetaling dit bedrag zat
+  mollieSettlementId        String?
+
+  /// Sleutel tegen dubbel aanmaken bij dubbelklik/netwerkfout
+  idempotencyKey String? @unique
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  paidAt    DateTime?
+
+  order        Order                      @relation(fields: [orderId], references: [id])
+  employee     User                       @relation("PaymentEmployee", fields: [employeeId], references: [id])
+  confirmedBy  User?                      @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id])
+  cashMovement CashMovement?
+  reconItems   MollieReconciliationItem[]
+
+  @@index([orderId])
+  @@index([method, status, createdAt])
+  @@index([employeeId, createdAt])
+}
+
+// -----------------------------------------------------------------------------
+//  Kas (contant geld in de lade)
+// -----------------------------------------------------------------------------
+
+/// Elke verandering van het contante saldo. Theoretisch kassaldo =
+/// SOM(amountCents) van alle mutaties van de dag.
+model CashMovement {
+  id            String           @id @default(cuid())
+  businessDayId String
+  type          CashMovementType
+  /// Positief = geld de lade in, negatief = geld eruit. NO_SALE = 0.
+  amountCents   Int
+  userId        String
+  /// Verplicht bij CASH_IN, CASH_OUT en NO_SALE
+  reason        String?
+  orderId       String?
+  paymentId     String?          @unique
+  /// Is de lade daadwerkelijk aangestuurd (false = USB niet verbonden)
+  drawerOpened  Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+
+  businessDay BusinessDay @relation(fields: [businessDayId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
+  order       Order?      @relation(fields: [orderId], references: [id])
+  payment     Payment?    @relation(fields: [paymentId], references: [id])
+
+  @@index([businessDayId, type])
+}
+
+// -----------------------------------------------------------------------------
+//  Z-rapport (dagafsluiting) — één per kassadag, onwijzigbaar
+// -----------------------------------------------------------------------------
+
+model ZReport {
+  id            String   @id @default(cuid())
+  /// "Z-2026-001"
+  number        String   @unique
+  businessDayId String   @unique
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  // --- Omzet ---
+  saleCount          Int
+  creditCount        Int
+  voidedCount        Int
+  noSaleCount        Int
+  grossRevenueCents  Int // incl. btw, na creditbonnen
+  netRevenueCents    Int // excl. btw
+  vatTotalCents      Int
+  discountTotalCents Int
+
+  // --- Contante kas ---
+  openingFloatCents   Int
+  cashSalesCents      Int
+  cashRefundsCents    Int // negatief
+  cashInCents         Int
+  cashOutCents        Int // negatief
+  expectedCashCents   Int // theoretisch kassaldo
+  countedCashCents    Int // geteld
+  cashDifferenceCents Int // geteld − theoretisch
+  /// JSON: {"5000":2,"2000":3,"1000":5,...,"1":0} — aantal per coupure (centen)
+  cashCountJson       String
+  cashDifferenceNote  String?
+
+  // --- Mollie ---
+  mollieTotalCents      Int // volgens kassa (netto: betalingen − refunds)
+  /// Volgens Mollie API bij afsluiten (null = API niet beschikbaar)
+  mollieApiTotalCents   Int?
+  mollieDifferenceCents Int?
+
+  /// Contant + Mollie moet gelijk zijn aan grossRevenueCents
+  paymentsTotalCents Int
+
+  createdBy   User                @relation(fields: [createdById], references: [id])
+  businessDay BusinessDay         @relation(fields: [businessDayId], references: [id])
+  vatLines    ZReportVatLine[]
+  mollieLines ZReportMollieLine[]
+}
+
+model ZReportVatLine {
+  id                 String  @id @default(cuid())
+  zReportId          String
+  vatCode            String
+  vatRateBp          Int
+  revenueAccountCode String
+  vatAccountCode     String?
+  totalInclCents     Int
+  vatCents           Int
+  totalExclCents     Int
+
+  zReport ZReport @relation(fields: [zReportId], references: [id], onDelete: Cascade)
+
+  @@unique([zReportId, vatCode])
+}
+
+/// Pin-controle per medewerker (per telefoon): kassa vs. Mollie.
+model ZReportMollieLine {
+  id                String @id @default(cuid())
+  zReportId         String
+  userId            String
+  posCount          Int
+  posAmountCents    Int
+  mollieCount       Int?
+  mollieAmountCents Int?
+  differenceCents   Int?
+  /// Aantal handmatige (modus C) bevestigingen — hoger risico op tikfouten
+  manualCount       Int    @default(0)
+
+  zReport ZReport @relation(fields: [zReportId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([zReportId, userId])
+}
+
+// -----------------------------------------------------------------------------
+//  Mollie-controle (dagelijkse reconciliatie) en uitbetalingen
+// -----------------------------------------------------------------------------
+
+model MollieReconciliation {
+  id               String               @id @default(cuid())
+  businessDayId    String
+  runAt            DateTime             @default(now())
+  status           ReconciliationStatus
+  posTotalCents    Int
+  mollieTotalCents Int
+  differenceCents  Int
+  /// Waarom gestart: "z-report", "cron", "manual"
+  trigger          String
+  errorMessage     String?
+
+  businessDay BusinessDay                @relation(fields: [businessDayId], references: [id])
+  items       MollieReconciliationItem[]
+
+  @@index([businessDayId, runAt])
+}
+
+model MollieReconciliationItem {
+  id                String                 @id @default(cuid())
+  reconciliationId  String
+  type              ReconciliationItemType
+  paymentId         String?
+  molliePaymentId   String?
+  mollieRefundId    String?
+  mollieTerminalId  String?
+  /// Medewerker (via kassa-betaling of via terminal → telefoon)
+  userId            String?
+  posAmountCents    Int?
+  mollieAmountCents Int?
+  mollieCreatedAt   DateTime?
+  note              String?
+
+  reconciliation MollieReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  payment        Payment?             @relation(fields: [paymentId], references: [id])
+  user           User?                @relation(fields: [userId], references: [id])
+
+  @@index([reconciliationId, type])
+}
+
+/// Mollie-uitbetaling (stl_xxx) met ingehouden kosten.
+model MollieSettlement {
+  id                String    @id // stl_xxx
+  reference         String
+  status            String
+  createdAt         DateTime
+  settledAt         DateTime?
+  /// Uitbetaald bedrag (netto, na kosten)
+  amountCents       Int
+  /// Bruto omzet in deze uitbetaling (som revenue.amountGross)
+  revenueGrossCents Int
+  /// Ingehouden kosten incl. btw (som costs.amountGross)
+  costsGrossCents   Int
+  costsNetCents     Int
+  costsVatCents     Int
+  invoiceId         String?
+  syncedAt          DateTime  @default(now())
+
+  lines MollieSettlementLine[]
+}
+
+model MollieSettlementLine {
+  id           String @id @default(cuid())
+  settlementId String
+  /// "revenue" of "cost"
+  kind         String
+  /// "2026-10"
+  period       String
+  method       String
+  description  String
+  count        Int
+  netCents     Int
+  vatCents     Int
+  grossCents   Int
+
+  settlement MollieSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([settlementId])
+}
+
+// -----------------------------------------------------------------------------
+//  Audit trail — alleen toevoegen, nooit wijzigen of verwijderen
+// -----------------------------------------------------------------------------
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  userId   String?
+  /// bijv. ORDER_NUMBERED, ORDER_PAID, ORDER_VOIDED, DRAWER_OPENED, NO_SALE,
+  /// MOLLIE_PAYMENT_CREATED, MOLLIE_STATUS, MOLLIE_MANUAL_CONFIRM, PRICE_CHANGED,
+  /// SETTING_CHANGED, DAY_OPENED, DAY_CLOSED, RECONCILIATION
+  action   String
+  entity   String?
+  entityId String?
+  /// JSON met details
+  data     String?
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([at])
+}
