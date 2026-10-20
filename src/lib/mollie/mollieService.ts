@@ -44,6 +44,7 @@ import type { PaymentStatus as DbPaymentStatus, Prisma } from '@prisma/client';
 
 import { audit } from '../audit';
 import { formatEUR, parseMollieAmount, toMollieAmount } from '../money';
+import { ensureOrderNumber } from '../orders/orderService';
 import { remainingToPay, settleOrderIfFullyPaid } from '../orders/settle';
 import { prisma } from '../prisma';
 import { shopDateString, shopDayRange } from '../time';
@@ -77,6 +78,16 @@ export function getMollieConfig(): MollieConfig {
     webhookBaseUrl,
     orgAccessToken: process.env.MOLLIE_ORG_ACCESS_TOKEN || null,
   };
+}
+
+/** Is er een (geldige) Mollie API-sleutel ingesteld? Zonder sleutel alleen modus C. */
+export function isMollieConfigured(): boolean {
+  try {
+    getMollieConfig();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export class MollieNotConfiguredError extends Error {
@@ -225,8 +236,8 @@ export async function startTerminalPayment(input: StartTerminalPaymentInput): Pr
       where: { id: input.orderId },
       include: { businessDay: true },
     });
-    if (order.status !== 'PENDING_PAYMENT' || !order.number) {
-      throw new PosPaymentError('Bon is niet klaar om af te rekenen (geen bonnummer of al afgerond)');
+    if (order.status !== 'PENDING_PAYMENT') {
+      throw new PosPaymentError('Bon is niet klaar om af te rekenen (al afgerond of geannuleerd)');
     }
     if (order.businessDay.status !== 'OPEN') throw new PosPaymentError('Kassadag is al afgesloten');
     if (order.type !== 'SALE') throw new PosPaymentError('Gebruik refundViaMollie() voor creditbonnen');
@@ -256,6 +267,8 @@ export async function startTerminalPayment(input: StartTerminalPaymentInput): Pr
       throw new PosPaymentError(`De telefoon van ${employee.name} wacht nog op betaling van ${busy.order.number}.`);
     }
 
+    // Bonnummer nu toekennen: het moet in de Mollie-omschrijving staan
+    await ensureOrderNumber(tx, order.id, input.initiatedById);
     const payment = await tx.payment.create({
       data: {
         orderId: order.id,
@@ -523,6 +536,7 @@ export async function confirmManualTapPayment(input: ManualTapConfirmation) {
     }
     const employee = await tx.user.findUniqueOrThrow({ where: { id: input.employeeId } });
 
+    await ensureOrderNumber(tx, order.id, input.confirmedById);
     const now = new Date();
     const payment = await tx.payment.create({
       data: {

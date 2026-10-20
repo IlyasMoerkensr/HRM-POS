@@ -6,3 +6,4 @@ node_modules/
 *.db-journal
 *.tsbuildinfo
 next-env.d.ts
+backups/

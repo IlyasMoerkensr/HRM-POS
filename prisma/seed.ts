@@ -42,6 +42,11 @@ const settings: Record<string, string> = {
 };
 
 async function main() {
+  // Alleen bij een lege database; bestaande gegevens nooit overschrijven.
+  if ((await prisma.user.count()) > 0 && !process.argv.includes('--force')) {
+    console.log('Database bevat al gegevens, basisgegevens overgeslagen.');
+    return;
+  }
   for (const a of ledgerAccounts) {
     await prisma.ledgerAccount.upsert({ where: { code: a.code }, create: a, update: { name: a.name, purpose: a.purpose } });
   }

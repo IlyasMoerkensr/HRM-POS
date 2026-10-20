@@ -91,3 +91,23 @@ export function summarizeVat(lines: VatInputLine[]): VatSummaryLine[] {
     return { ...l, vatCents, totalExclCents: l.totalInclCents - vatCents };
   });
 }
+
+/**
+ * Invoer van een medewerker → centen. Accepteert "12,50", "12.50", "€ 12,5",
+ * "12". Geeft null bij ongeldige invoer.
+ */
+export function parseEuroInput(input: string): Cents | null {
+  const cleaned = input.replace(/[€\s]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '');
+  const match = /^(-)?(\d{1,7})(?:[.,](\d{1,2}))?$/.exec(cleaned);
+  if (!match) return null;
+  const [, minus, whole, frac = ''] = match;
+  const cents = Number(whole) * 100 + Number(frac.padEnd(2, '0'));
+  return minus ? -cents : cents;
+}
+
+/** 1234 → "12,34" (zonder €-teken, voor invoervelden) */
+export function formatEuroInput(cents: Cents): string {
+  const sign = cents < 0 ? '-' : '';
+  const abs = Math.abs(cents);
+  return `${sign}${Math.floor(abs / 100)},${String(abs % 100).padStart(2, '0')}`;
+}
