@@ -383,7 +383,9 @@ interface PosDetails {
  *
  * @returns null als het geen betaling van deze kassa is.
  */
-export async function syncMolliePayment(molliePaymentId: string): Promise<{ paymentId: string; status: DbPaymentStatus; orderPaid: boolean } | null> {
+export async function syncMolliePayment(
+  molliePaymentId: string,
+): Promise<{ paymentId: string; status: DbPaymentStatus; orderPaid: boolean; testChangeStateUrl?: string } | null> {
   if (!/^tr_\w+$/.test(molliePaymentId)) return null;
 
   const mp = await client().payments.get(molliePaymentId);
@@ -441,7 +443,9 @@ export async function syncMolliePayment(molliePaymentId: string): Promise<{ paym
 
     const finalStatus = statusChanges ? newStatus : current.status;
     const orderPaid = finalStatus === 'PAID' ? await settleOrderIfFullyPaid(tx, current.orderId) : false;
-    return { paymentId: current.id, status: finalStatus, orderPaid };
+    // Testmodus: Mollie stuurt niets naar de telefoon; via deze link zet je de uitkomst zelf
+    const testChangeStateUrl = mp.mode === 'test' ? mp._links.changePaymentState?.href : undefined;
+    return { paymentId: current.id, status: finalStatus, orderPaid, testChangeStateUrl };
   });
 }
 
@@ -457,10 +461,12 @@ export async function refreshPaymentStatus(paymentId: string) {
 
   let status = payment.status;
   let orderStatus = payment.order.status;
+  let testChangeStateUrl: string | undefined;
   if (payment.status === 'PENDING' && payment.molliePaymentId) {
     const synced = await syncMolliePayment(payment.molliePaymentId);
     if (synced) {
       status = synced.status;
+      testChangeStateUrl = synced.testChangeStateUrl;
       if (synced.orderPaid) orderStatus = 'PAID';
     }
   }
@@ -472,30 +478,68 @@ export async function refreshPaymentStatus(paymentId: string) {
     amountCents: payment.amountCents,
     employeeName: payment.employee.name,
     reason: payment.mollieStatusReason,
+    testChangeStateUrl,
   };
 }
 
-/** Klant ziet ervan af / verkeerde telefoon: lopend verzoek afbreken. */
-export async function cancelTerminalPayment(paymentId: string, userId: string) {
+/**
+ * Lopend pinverzoek afbreken (klant ziet ervan af, verkeerde telefoon, test).
+ *
+ * Normaal annuleren we eerst bij Mollie. Weigert Mollie dat (bijv. omdat het
+ * verzoek niet meer annuleerbaar is, in testmodus, of Mollie onbereikbaar),
+ * dan kan met `force` de betaling alleen in de kassa worden afgebroken:
+ *  - eerst wordt de echte status bij Mollie opgehaald; is er al betaald,
+ *    dan weigeren we (geld is binnen);
+ *  - slaagt de betaling later alsnog, dan meldt de Mollie-controle hem als
+ *    "alleen in Mollie", zodat er niets verloren gaat.
+ */
+export async function cancelTerminalPayment(paymentId: string, userId: string, options: { force?: boolean } = {}) {
   const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
   if (payment.status !== 'PENDING') throw new PosPaymentError('Deze betaling loopt niet meer');
 
+  let mollieError: string | null = null;
+  let statusChecked = false;
   if (payment.molliePaymentId) {
     try {
       await client().payments.cancel(payment.molliePaymentId);
     } catch (err) {
-      // Niet (meer) annuleerbaar: misschien is de klant net aan het betalen.
-      // Status opnieuw ophalen in plaats van blind annuleren.
-      await syncMolliePayment(payment.molliePaymentId);
-      const fresh = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
-      if (fresh.status === 'PAID') throw new PosPaymentError('Betaling is al geslaagd en kan niet meer geannuleerd worden');
-      throw new PosPaymentError(`Annuleren mislukt: ${mollieErrorMessage(err)}. Annuleer op de telefoon.`);
+      mollieError = mollieErrorMessage(err);
     }
-    await syncMolliePayment(payment.molliePaymentId);
-  } else {
-    await prisma.payment.update({ where: { id: paymentId }, data: { status: 'CANCELED' } });
+    // Altijd de echte status ophalen (ook als annuleren mislukte)
+    try {
+      statusChecked = (await syncMolliePayment(payment.molliePaymentId)) !== null;
+    } catch (err) {
+      mollieError ??= mollieErrorMessage(err);
+    }
+    const fresh = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    if (fresh.status === 'PAID') throw new PosPaymentError('Deze betaling is al geslaagd en kan niet meer worden afgebroken.');
+    if (fresh.status !== 'PENDING') {
+      await audit(prisma, { action: 'MOLLIE_PAYMENT_CANCELED', userId, entity: 'Payment', entityId: paymentId, data: { mollieStatus: fresh.mollieStatus } });
+      return { forced: false };
+    }
+    if (!options.force) {
+      throw new PosPaymentError(
+        statusChecked
+          ? `Mollie kon dit verzoek niet annuleren${mollieError ? ` (${mollieError})` : ''}. Volgens Mollie is er nog niet betaald. Staat het nog op de telefoon, annuleer het daar. Anders kun je het in de kassa afbreken.`
+          : `De status kon niet bij Mollie worden gecontroleerd (${mollieError ?? 'onbekende fout'}). Kijk op de telefoon of in het Mollie Dashboard of de klant níet heeft betaald. Daarna kun je het in de kassa afbreken.`,
+      );
+    }
   }
-  await audit(prisma, { action: 'MOLLIE_PAYMENT_CANCELED', userId, entity: 'Payment', entityId: paymentId });
+
+  // Alleen in de kassa afbreken
+  const updated = await prisma.payment.updateMany({
+    where: { id: paymentId, status: 'PENDING' },
+    data: { status: 'CANCELED', mollieStatusReason: payment.molliePaymentId ? 'Afgebroken in de kassa (Mollie annuleerde niet)' : 'Afgebroken in de kassa' },
+  });
+  if (updated.count === 0) throw new PosPaymentError('Deze betaling is intussen gewijzigd; vernieuw het scherm');
+  await audit(prisma, {
+    action: payment.molliePaymentId ? 'MOLLIE_PAYMENT_ABANDONED' : 'MOLLIE_PAYMENT_CANCELED',
+    userId,
+    entity: 'Payment',
+    entityId: paymentId,
+    data: { molliePaymentId: payment.molliePaymentId, amountCents: payment.amountCents, mollieError },
+  });
+  return { forced: Boolean(payment.molliePaymentId) };
 }
 
 // ===========================================================================
@@ -1176,6 +1220,10 @@ export async function settlementSummary(fromDate: Date, untilDate: Date) {
 // ===========================================================================
 
 export function mollieErrorMessage(err: unknown): string {
+  // Netwerkfouten (ook als het Mollie-pakket ze inpakt) leesbaar maken
+  if (err instanceof Error && /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|request to .* failed|certificate|socket hang up/i.test(err.message)) {
+    return 'Mollie niet bereikbaar, controleer de internetverbinding';
+  }
   if (err instanceof MollieApiError) {
     if (err.statusCode === 401) return 'API-sleutel ongeldig of ingetrokken';
     if (err.statusCode === 403) return 'Geen toegang (verkeerde sleutel of ontbrekende rechten)';
@@ -1184,7 +1232,9 @@ export function mollieErrorMessage(err: unknown): string {
     return err.message;
   }
   if (err instanceof Error) {
-    if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed/i.test(err.message)) return 'Mollie niet bereikbaar (internetverbinding?)';
+    if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|request to .* failed|certificate|socket hang up/i.test(err.message)) {
+      return 'Mollie niet bereikbaar, controleer de internetverbinding';
+    }
     return err.message;
   }
   return String(err);

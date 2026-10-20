@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cashMovementAction } from '@/app/actions/day';
 import {
   checkoutAction,
+  checkoutStateAction,
   confirmDrawerAction,
   createCreditAction,
   discardDraftAction,
@@ -410,7 +411,19 @@ export function KassaApp(props: KassaProps) {
         />
       )}
 
-      {dialog === 'recent' && <RecentDialog onClose={() => setDialog(null)} />}
+      {dialog === 'recent' && (
+        <RecentDialog
+          onClose={() => setDialog(null)}
+          onOpen={(orderId) =>
+            guard(async () => {
+              const r = await checkoutStateAction(orderId);
+              if (!r.ok) return setError(r.error);
+              setDialog(null);
+              if (r.data.status === 'PENDING_PAYMENT') setCheckout(r.data);
+            })
+          }
+        />
+      )}
 
       {dialog === 'cash' && (
         <CashMovementDialog
@@ -790,7 +803,7 @@ function NoSaleDialog({ onClose, onOpen }: { onClose: () => void; onOpen: (reaso
   );
 }
 
-function RecentDialog({ onClose }: { onClose: () => void }) {
+function RecentDialog({ onClose, onOpen }: { onClose: () => void; onOpen: (orderId: string) => void }) {
   type Row = Extract<Awaited<ReturnType<typeof recentOrdersAction>>, { ok: true }>['data'][number];
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -820,8 +833,15 @@ function RecentDialog({ onClose }: { onClose: () => void }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r) => (
-              <tr key={r.id} className={cx(r.status === 'VOIDED' && 'text-slate-400 line-through')}>
-                <td className="py-1.5 font-mono">{r.number}</td>
+              <tr
+                key={r.id}
+                onClick={r.status === 'PENDING_PAYMENT' ? () => onOpen(r.id) : undefined}
+                className={cx(r.status === 'VOIDED' && 'text-slate-400 line-through', r.status === 'PENDING_PAYMENT' && 'cursor-pointer bg-amber-50 hover:bg-amber-100')}
+              >
+                <td className="py-1.5 font-mono">
+                  {r.number}
+                  {r.status === 'PENDING_PAYMENT' && <span className="ml-2 font-sans text-xs font-semibold text-amber-800">→ openen</span>}
+                </td>
                 <td>{r.at ? new Date(r.at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : ''}</td>
                 <td>{r.cashier}</td>
                 <td title={r.voidReason ?? undefined}>{status[r.status]}</td>

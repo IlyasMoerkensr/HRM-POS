@@ -68,6 +68,10 @@ Kassasysteem dat lokaal op de kassa-pc draait (net als het rooster), met:
 3. **Beheer → Medewerkers → Telefoon:** koppel elke medewerker aan zijn of haar telefoon.
 4. Nu verschijnt bij afrekenen de knop **“Stuur bedrag naar telefoon van …”**. Het bedrag staat dan klaar in de Mollie Tap-app en de kassa sluit de bon vanzelf zodra de klant betaald heeft.
 
+**Testen met een `test_`-sleutel:** Mollie stuurt in testmodus niets naar de telefoon. Op het wachtscherm verschijnt dan een link naar de Mollie-testpagina, waar je de betaling op *paid* of *failed* zet. Wil je echt op de telefoon testen, gebruik dan de `live_`-sleutel met een klein bedrag en stort het terug via **Retour**.
+
+**Pinbetaling blijft hangen?** Klik op **Pinbetaling annuleren**. Lukt annuleren bij Mollie niet, dan vraagt de kassa of je hem **in de kassa wilt afbreken**. Doe dat alleen als de klant niet heeft betaald. Slaagt hij later toch, dan meldt de Mollie-controle hem als “alleen in Mollie”. Een openstaande bon vind je terug via **Bonnen** (oranje regel → openen) of bij **Dag**.
+
 Zonder Mollie-sleutel werkt pinnen ook: de medewerker tikt het bedrag in de Mollie Tap-app en klikt in de kassa op **“Handmatig ingetikt”**. De kassa controleert die betalingen later automatisch met Mollie.
 
 ## Dagelijks gebruik

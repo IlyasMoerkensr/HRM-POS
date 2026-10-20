@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 
 import { closeDayAction, daySummaryAction, reconcileAction } from '@/app/actions/day';
 import { discardDraftAction, voidOrderAction } from '@/app/actions/pos';
+import { CancelPinButton } from '@/components/CancelPinButton';
 import { vatLabel } from '@/components/CartView';
 import { Button, cx, ErrorBox, Modal, Money } from '@/components/ui';
 import { formatEUR } from '@/lib/money';
@@ -110,9 +111,17 @@ export function DagafsluitingApp({
               <section className="space-y-2 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
                 <h2 className="font-bold text-amber-900">Eerst afronden</h2>
                 {summary.blockers.pendingPayments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2">
-                    <span>Lopende pinbetaling {p.orderNumber} op telefoon van {p.employee}</span>
+                  <div key={p.id} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2">
+                    <span className="flex-1">Lopende pinbetaling {p.orderNumber} op telefoon van {p.employee}</span>
                     <Money cents={p.amountCents} />
+                    <CancelPinButton
+                      paymentId={p.id}
+                      amountCents={p.amountCents}
+                      size="sm"
+                      label="Afbreken"
+                      onError={setError}
+                      onDone={() => void refresh()}
+                    />
                   </div>
                 ))}
                 {summary.blockers.openOrders.map((o) => (

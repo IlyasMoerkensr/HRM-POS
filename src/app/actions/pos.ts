@@ -274,11 +274,13 @@ export async function confirmManualPinAction(input: { orderId: string; amountCen
   });
 }
 
-export async function cancelPinAction(paymentId: string) {
+/** `force`: alleen in de kassa afbreken als Mollie niet wil annuleren (zie cancelTerminalPayment). */
+export async function cancelPinAction(paymentId: string, force = false) {
   return run(async () => {
     const actor = await requireAnyActor();
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
-    await cancelTerminalPayment(paymentId, actor.id);
+    if (actor.channel === 'telefoon' && payment.employeeId !== actor.id) throw new AuthError('Dit is niet jouw pinbetaling');
+    await cancelTerminalPayment(paymentId, actor.id, { force });
     return checkoutState(payment.orderId);
   });
 }

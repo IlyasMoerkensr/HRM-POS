@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   backToCartAction,
-  cancelPinAction,
   checkoutStateAction,
   confirmManualPinAction,
   payCashAction,
@@ -14,6 +13,7 @@ import {
 import { formatEUR } from '@/lib/money';
 import type { CheckoutState, PosUser } from '@/lib/types';
 
+import { CancelPinButton } from './CancelPinButton';
 import { Button, cx, digitsToCents, ErrorBox, Modal, Money, newKey, NumPad, textOn } from './ui';
 
 const BILLS = [500, 1000, 2000, 5000];
@@ -336,8 +336,8 @@ function PinWaiting({
   apply,
   setError,
 }: CheckoutPanelProps & { pending: CheckoutState['payments'][number]; apply: (s: CheckoutState) => void; setError: (e: string | null) => void }) {
-  const [cancelling, setCancelling] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [testUrl, setTestUrl] = useState<string | null>(null);
   // Laatste versies van de callbacks, zonder de polling telkens te herstarten
   const applyRef = useRef(apply);
   const errorRef = useRef(setError);
@@ -354,9 +354,10 @@ function PinWaiting({
       setSeconds((s) => s + 2);
       try {
         const res = await fetch(`/api/payments/${pending.id}/status`, { cache: 'no-store' });
-        const body = (await res.json()) as { status?: string; error?: string };
+        const body = (await res.json()) as { status?: string; error?: string; testChangeStateUrl?: string };
         if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
         failures = 0;
+        if (!stopped) setTestUrl(body.testChangeStateUrl ?? null);
         if (body.status && body.status !== 'PENDING') {
           const r = await checkoutStateAction(state.orderId);
           if (r.ok && !stopped) applyRef.current(r.data);
@@ -373,13 +374,6 @@ function PinWaiting({
     };
   }, [pending.id, state.orderId]);
 
-  const cancel = async () => {
-    setCancelling(true);
-    const r = await cancelPinAction(pending.id);
-    setCancelling(false);
-    if (!r.ok) return setError(r.error);
-    apply(r.data);
-  };
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-5 rounded-2xl bg-blue-50 p-6 text-center ring-1 ring-blue-200">
@@ -390,9 +384,16 @@ function PinWaiting({
         <p className="mt-2 text-slate-600">De klant kan de pas of telefoon tegen de telefoon houden.</p>
         <p className="mt-1 text-sm text-slate-400">{seconds} s</p>
       </div>
-      <Button variant="danger" onClick={cancel} disabled={cancelling}>
-        Pinbetaling annuleren
-      </Button>
+      {testUrl && (
+        <div className="max-w-md rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          <strong>Testmodus:</strong> met een test-sleutel stuurt Mollie niets naar de telefoon.{' '}
+          <a href={testUrl} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+            Open de Mollie-testpagina
+          </a>{' '}
+          en kies daar “paid” of “failed”; de kassa ziet het binnen een paar seconden.
+        </div>
+      )}
+      <CancelPinButton paymentId={pending.id} amountCents={pending.amountCents} onDone={apply} onError={setError} />
     </div>
   );
 }

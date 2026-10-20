@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  cancelPinAction,
   checkoutAction,
   checkoutStateAction,
   parkAction,
@@ -11,6 +10,7 @@ import {
   phoneLogoutAction,
   phoneStateAction,
 } from '@/app/actions/pos';
+import { CancelPinButton } from '@/components/CancelPinButton';
 import { CartView, OpenPriceDialog } from '@/components/CartView';
 import { CheckoutPanel } from '@/components/CheckoutPanel';
 import { ProductPicker } from '@/components/ProductPicker';
@@ -195,13 +195,7 @@ function PhoneHome({ products, categories, onLogout }: { products: PosProduct[];
                 })}>
                   Bekijken
                 </Button>
-                <Button size="sm" variant="danger" onClick={() => guard(async () => {
-                  const r = await cancelPinAction(p.id);
-                  if (!r.ok) return setError(r.error);
-                  void refresh();
-                })}>
-                  Annuleren
-                </Button>
+                <CancelPinButton paymentId={p.id} amountCents={p.amountCents} size="sm" label="Annuleren" onError={setError} onDone={() => void refresh()} />
               </div>
             </div>
           ))}
