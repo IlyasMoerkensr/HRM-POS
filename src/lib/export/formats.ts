@@ -25,6 +25,7 @@ const vatCols = (prefix: string, label: string): Column[] =>
 
 export const DAY_COLUMNS: Column[] = [
   { key: 'datum', label: 'Datum', width: 12 },
+  { key: 'periode', label: 'Periode' },
   { key: 'zRapport', label: 'Z-rapport', width: 13 },
   { key: 'bonnen', label: 'Bonnen' },
   { key: 'creditbonnen', label: 'Creditbonnen' },

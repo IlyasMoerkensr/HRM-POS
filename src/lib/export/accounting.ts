@@ -80,7 +80,7 @@ export async function loadPeriod(period: Period) {
     include: {
       zReport: { include: { vatLines: true, mollieLines: { include: { user: { select: { name: true } } } } } },
     },
-    orderBy: { date: 'asc' },
+    orderBy: [{ date: 'asc' }, { sequence: 'asc' }],
   });
   const closed = days.filter((d) => d.status === 'CLOSED' && d.zReport);
   const open = days.filter((d) => !(d.status === 'CLOSED' && d.zReport)).map((d) => d.date);
@@ -119,6 +119,7 @@ export function dayRows(data: PeriodData) {
     const vat = (code: string) => z.vatLines.find((v) => v.vatCode === code);
     return {
       datum: d.date,
+      periode: d.sequence,
       zRapport: z.number,
       bonnen: z.saleCount,
       creditbonnen: z.creditCount,

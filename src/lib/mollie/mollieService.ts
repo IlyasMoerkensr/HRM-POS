@@ -47,7 +47,7 @@ import { formatEUR, parseMollieAmount, toMollieAmount } from '../money';
 import { ensureOrderNumber } from '../orders/orderService';
 import { remainingToPay, settleOrderIfFullyPaid } from '../orders/settle';
 import { prisma } from '../prisma';
-import { shopDateString, shopDayRange } from '../time';
+import { shopDateString } from '../time';
 
 // ===========================================================================
 //  Configuratie & client
@@ -819,7 +819,16 @@ export async function reconcileBusinessDay(
   trigger: 'z-report' | 'cron' | 'manual',
 ): Promise<ReconciliationResult> {
   const day = await prisma.businessDay.findUniqueOrThrow({ where: { id: businessDayId } });
-  const { from, until } = shopDayRange(day.date);
+  // Venster = de kassaperiode zelf (van start tot Z-rapport), niet de kalenderdag.
+  // 15 minuten speling aan het begin, maar nooit vóór het einde van de vorige periode.
+  const previous = await prisma.businessDay.findFirst({
+    where: { closedAt: { not: null, lte: day.openedAt }, id: { not: day.id } },
+    orderBy: { closedAt: 'desc' },
+    select: { closedAt: true },
+  });
+  const margin = new Date(day.openedAt.getTime() - 15 * 60 * 1000);
+  const from = previous?.closedAt && previous.closedAt > margin ? previous.closedAt : margin;
+  const until = day.closedAt ?? new Date();
   const users = await prisma.user.findMany({ select: { id: true, name: true, mollieTerminalId: true } });
   const userByTerminal = new Map(users.filter((u) => u.mollieTerminalId).map((u) => [u.mollieTerminalId!, u]));
   const userById = new Map(users.map((u) => [u.id, u]));

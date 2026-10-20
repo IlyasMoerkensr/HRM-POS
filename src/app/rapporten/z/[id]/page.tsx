@@ -50,7 +50,7 @@ export default async function ZReportPage({ params }: { params: Promise<{ id: st
   const account = (purpose: string) => accounts.find((a) => a.purpose === purpose)?.code ?? '?';
   const count = JSON.parse(z.cashCountJson) as Record<string, number>;
   const dateText = new Date(`${z.businessDay.date}T12:00:00`).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const date = dateText.charAt(0).toUpperCase() + dateText.slice(1);
+  const date = dateText.charAt(0).toUpperCase() + dateText.slice(1) + (z.businessDay.sequence > 1 ? ` · periode ${z.businessDay.sequence}` : '');
   const cashCents = z.paymentsTotalCents - z.mollieTotalCents;
 
   return (
@@ -75,7 +75,7 @@ export default async function ZReportPage({ params }: { params: Promise<{ id: st
             <div>{date}</div>
           </div>
           <div className="text-right text-xs text-slate-600">
-            Geopend door {z.businessDay.openedBy.name}
+            Geopend door {z.businessDay.openedBy.name} om {z.businessDay.openedAt.toLocaleTimeString('nl-NL', { timeZone: 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit' })}
             <br />
             Afgesloten door {z.createdBy.name}
             <br />

@@ -250,10 +250,15 @@ model Product {
 //  Kassadag
 // -----------------------------------------------------------------------------
 
+/// Een kassaperiode loopt van "Dag starten" tot het Z-rapport (niet van
+/// middernacht tot middernacht). Normaal één per dag; na een (per ongeluk)
+/// afgesloten dag kan op dezelfde datum een volgende periode starten.
 model BusinessDay {
   id                String            @id @default(cuid())
-  /// Kalenderdag in Europe/Amsterdam, "2026-10-20"
-  date              String            @unique
+  /// Datum (Europe/Amsterdam) waarop de periode is gestart, "2026-10-20"
+  date              String
+  /// 1 = eerste periode van die datum, 2 = tweede (na een eerder Z-rapport), ...
+  sequence          Int               @default(1)
   status            BusinessDayStatus @default(OPEN)
   openingFloatCents Int
   openedById        String
@@ -267,6 +272,9 @@ model BusinessDay {
   cashMovements   CashMovement[]
   zReport         ZReport?
   reconciliations MollieReconciliation[]
+
+  @@unique([date, sequence])
+  @@index([status])
 }
 
 // -----------------------------------------------------------------------------

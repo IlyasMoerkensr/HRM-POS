@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function RapportenPage() {
   if (!(await isPairedDevice())) redirect('/koppelen');
   const reports = await prisma.zReport.findMany({
-    include: { businessDay: { select: { date: true } }, createdBy: { select: { name: true } } },
+    include: { businessDay: { select: { date: true, sequence: true } }, createdBy: { select: { name: true } } },
     orderBy: { createdAt: 'desc' },
     take: 120,
   });
@@ -52,7 +52,10 @@ export default async function RapportenPage() {
                         {z.number}
                       </Link>
                     </td>
-                    <td>{new Date(`${z.businessDay.date}T12:00:00`).toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                    <td>
+                      {new Date(`${z.businessDay.date}T12:00:00`).toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                      {z.businessDay.sequence > 1 && <span className="text-slate-500"> · periode {z.businessDay.sequence}</span>}
+                    </td>
                     <td className="text-right tabular">{formatEUR(z.grossRevenueCents)}</td>
                     <td className="text-right tabular">{formatEUR(z.paymentsTotalCents - z.mollieTotalCents)}</td>
                     <td className="text-right tabular">{formatEUR(z.mollieTotalCents)}</td>

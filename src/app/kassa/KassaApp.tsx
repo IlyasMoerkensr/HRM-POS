@@ -44,7 +44,9 @@ export interface KassaProps {
   categories: PosCategory[];
   users: PosUser[];
   activeUserId: string | null;
-  day: { date: string; status: 'OPEN' | 'CLOSED'; zReport: { id: string; number: string } | null } | null;
+  day: { date: string; sequence: number; status: 'OPEN' | 'CLOSED'; zReport: { id: string; number: string } | null } | null;
+  /** Wat er bij de laatste afsluiting in de lade is geteld (voorstel beginsaldo) */
+  suggestedFloatCents: number;
   unclosedDays: string[];
   drawer: DrawerSettings;
   mollieConfigured: boolean;
@@ -260,6 +262,7 @@ export function KassaApp(props: KassaProps) {
       {(!props.day || props.day.status !== 'OPEN') && (
         <DayStartDialog
           day={props.day}
+          suggestedFloatCents={props.suggestedFloatCents}
           role={active.role}
           onStarted={() => router.refresh()}
           onSwitch={() => guard(async () => { await logoutEmployeeAction(); setActiveUserId(null); })}
@@ -524,16 +527,20 @@ function PinPrompt({ user, onClose, onOk }: { user: PosUser; onClose: () => void
 
 function DayStartDialog({
   day,
+  suggestedFloatCents,
   role,
   onStarted,
   onSwitch,
 }: {
   day: KassaProps['day'];
+  suggestedFloatCents: number;
   role: PosUser['role'];
   onStarted: () => void;
   onSwitch: () => void;
 }) {
-  const [digits, setDigits] = useState('');
+  const [digits, setDigits] = useState(suggestedFloatCents > 0 ? String(suggestedFloatCents) : '');
+  const [newPeriod, setNewPeriod] = useState(false);
+  const [confirmNewPeriod, setConfirmNewPeriod] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -559,7 +566,32 @@ function DayStartDialog({
     </div>
   );
 
-  if (day?.status === 'CLOSED') {
+  if (day?.status === 'CLOSED' && confirmNewPeriod) {
+    return (
+      <Modal title="Nieuwe kassaperiode starten?" onClose={() => setConfirmNewPeriod(false)}>
+        <div className="space-y-4">
+          <p>
+            Gebruik dit alleen als de dag <strong>per ongeluk</strong> is afgesloten, of als je na het afsluiten toch nog moet verkopen.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+            <li>Het Z-rapport{day.zReport ? ` ${day.zReport.number}` : ''} blijft bestaan en verandert niet.</li>
+            <li>Alles wat je nu verkoopt komt op een nieuw Z-rapport (periode {day.sequence + 1} van deze dag).</li>
+            <li>Aan het eind van de dag sluit je deze periode gewoon weer af via “Dag”.</li>
+          </ul>
+          <div className="grid grid-cols-2 gap-2">
+            <Button size="lg" onClick={() => setConfirmNewPeriod(false)}>
+              Terug
+            </Button>
+            <Button variant="primary" size="lg" onClick={() => { setNewPeriod(true); setConfirmNewPeriod(false); }}>
+              Ja, nieuwe periode
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (day?.status === 'CLOSED' && !newPeriod) {
     return (
       <Modal title="Kassadag afgesloten">
         <div className="space-y-4">
@@ -575,13 +607,23 @@ function DayStartDialog({
             </Link>
           )}
           {links}
+          <div className="border-t border-slate-200 pt-4">
+            {role === 'MEDEWERKER' ? (
+              <p className="text-sm text-slate-500">Per ongeluk afgesloten? Vraag een manager of beheerder om een nieuwe kassaperiode te starten.</p>
+            ) : (
+              <button type="button" onClick={() => setConfirmNewPeriod(true)} className="text-sm font-semibold text-blue-700 underline">
+                Per ongeluk afgesloten of toch nog verkopen? Nieuwe kassaperiode starten
+              </button>
+            )}
+          </div>
         </div>
       </Modal>
     );
   }
   return (
     <Modal
-      title="Kassadag starten"
+      title={newPeriod ? `Nieuwe kassaperiode (periode ${(day?.sequence ?? 0) + 1})` : 'Kassadag starten'}
+      onClose={newPeriod ? () => setNewPeriod(false) : undefined}
       footer={
         <Button
           variant="success"
@@ -590,17 +632,20 @@ function DayStartDialog({
           disabled={busy}
           onClick={async () => {
             setBusy(true);
-            const r = await startDayAction(digitsToCents(digits));
+            const r = await startDayAction(digitsToCents(digits), newPeriod);
             setBusy(false);
             if (!r.ok) return setError(r.error);
             onStarted();
           }}
         >
-          Start de dag met {formatEUR(digitsToCents(digits))} in de lade
+          {newPeriod ? `Start periode ${(day?.sequence ?? 0) + 1}` : 'Start de dag'} met {formatEUR(digitsToCents(digits))} in de lade
         </Button>
       }
     >
-      <p className="mb-3 text-slate-600">Tel het wisselgeld in de lade en vul het beginsaldo in.</p>
+      <p className="mb-3 text-slate-600">
+        Tel het wisselgeld in de lade en vul het beginsaldo in.
+        {suggestedFloatCents > 0 && ` Voorgesteld: wat er bij de laatste afsluiting is geteld (${formatEUR(suggestedFloatCents)}).`}
+      </p>
       <div className="mb-3">{links}</div>
       <div className="mb-3 rounded-xl bg-slate-50 px-4 py-4 text-right text-4xl font-bold">{formatEUR(digitsToCents(digits))}</div>
       <NumPad value={digits} onChange={setDigits} />

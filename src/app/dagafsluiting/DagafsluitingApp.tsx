@@ -26,11 +26,13 @@ export function DagafsluitingApp({
   canClose,
   mollieConfigured,
   isToday,
+  sequence,
 }: {
   initial: DaySummary;
   canClose: boolean;
   mollieConfigured: boolean;
   isToday: boolean;
+  sequence: number;
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState(initial);
@@ -64,7 +66,9 @@ export function DagafsluitingApp({
     }
   };
 
-  const dateLabel = new Date(`${summary.date}T12:00:00`).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const dateLabel =
+    new Date(`${summary.date}T12:00:00`).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) +
+    (sequence > 1 ? ` (periode ${sequence})` : '');
 
   return (
     <div className="min-h-dvh">
@@ -93,7 +97,7 @@ export function DagafsluitingApp({
       <main className="mx-auto max-w-5xl space-y-4 p-4">
         {!isToday && (
           <div className="rounded-xl bg-amber-100 px-4 py-3 text-amber-900">
-            Dit is een eerdere dag die nog niet is afgesloten. Sluit deze eerst af.
+            Deze kassadag is gestart op een eerdere datum en loopt nog. Sluit hem af; daarna start je een nieuwe dag.
           </div>
         )}
         <ErrorBox message={error} onClose={() => setError(null)} />

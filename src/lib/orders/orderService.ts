@@ -30,11 +30,21 @@ export class PosError extends Error {
 //  Kassadag
 // ===========================================================================
 
-export async function getToday() {
-  return prisma.businessDay.findUnique({ where: { date: shopDateString() } });
+/**
+ * De lopende kassaperiode. Er is er hoogstens één open, ongeacht de datum:
+ * een dag die om 08:00 start en na middernacht doorloopt, blijft dezelfde
+ * kassadag tot het Z-rapport.
+ */
+export async function getOpenDay(db: Db = prisma) {
+  return db.businessDay.findFirst({ where: { status: 'OPEN' }, orderBy: { openedAt: 'desc' } });
 }
 
-/** Eerdere dagen die nog niet zijn afgesloten (Z-rapport vergeten). */
+/** Voor het kassascherm: de lopende periode, anders de laatste van vandaag (kan afgesloten zijn). */
+export async function getToday() {
+  return (await getOpenDay()) ?? prisma.businessDay.findFirst({ where: { date: shopDateString() }, orderBy: { sequence: 'desc' } });
+}
+
+/** Een open periode die op een eerdere datum is gestart (Z-rapport vergeten). */
 export async function getUnclosedEarlierDays() {
   return prisma.businessDay.findMany({
     where: { status: 'OPEN', date: { lt: shopDateString() } },
@@ -42,30 +52,48 @@ export async function getUnclosedEarlierDays() {
   });
 }
 
-export async function startBusinessDay(userId: string, openingFloatCents: number) {
+/** Voorstel voor het beginsaldo: wat er bij de laatste afsluiting in de lade is geteld. */
+export async function suggestedOpeningFloat(): Promise<number> {
+  const last = await prisma.zReport.findFirst({ orderBy: { createdAt: 'desc' }, select: { countedCashCents: true } });
+  return last?.countedCashCents ?? 0;
+}
+
+/**
+ * Kassadag (periode) starten.
+ * `afterClose`: bewust een nieuwe periode starten op een datum die al een
+ * Z-rapport heeft (bijv. per ongeluk afgesloten, of na sluiting toch nog verkopen).
+ */
+export async function startBusinessDay(userId: string, openingFloatCents: number, options: { afterClose?: boolean } = {}) {
   if (!Number.isSafeInteger(openingFloatCents) || openingFloatCents < 0) {
     throw new PosError('Vul een geldig beginsaldo in');
   }
   const date = shopDateString();
   return prisma.$transaction(async (tx) => {
-    const existing = await tx.businessDay.findUnique({ where: { date } });
-    if (existing?.status === 'CLOSED') throw new PosError('Vandaag is al afgesloten met een Z-rapport');
-    if (existing) return existing;
+    const open = await getOpenDay(tx);
+    if (open) return open;
 
-    const day = await tx.businessDay.create({ data: { date, openingFloatCents, openedById: userId } });
+    const last = await tx.businessDay.findFirst({ where: { date }, orderBy: { sequence: 'desc' } });
+    if (last && !options.afterClose) {
+      throw new PosError('Vandaag is al afgesloten met een Z-rapport. Kies “Nieuwe kassaperiode starten” als je toch nog moet verkopen.');
+    }
+    const sequence = (last?.sequence ?? 0) + 1;
+    const day = await tx.businessDay.create({ data: { date, sequence, openingFloatCents, openedById: userId } });
     await tx.cashMovement.create({
-      data: { businessDayId: day.id, type: 'OPENING_FLOAT', amountCents: openingFloatCents, userId, reason: 'Beginsaldo' },
+      data: { businessDayId: day.id, type: 'OPENING_FLOAT', amountCents: openingFloatCents, userId, reason: sequence > 1 ? `Beginsaldo periode ${sequence}` : 'Beginsaldo' },
     });
-    await audit(tx, { action: 'DAY_OPENED', userId, entity: 'BusinessDay', entityId: day.id, data: { date, openingFloatCents } });
+    await audit(tx, { action: 'DAY_OPENED', userId, entity: 'BusinessDay', entityId: day.id, data: { date, sequence, openingFloatCents, afterClose: Boolean(options.afterClose) } });
     return day;
   });
 }
 
 async function requireOpenToday(db: Db) {
-  const day = await db.businessDay.findUnique({ where: { date: shopDateString() } });
-  if (!day) throw new PosError('Start eerst de kassadag (beginsaldo invoeren)');
-  if (day.status !== 'OPEN') throw new PosError('De kassadag is al afgesloten');
-  return day;
+  const day = await getOpenDay(db);
+  if (day) return day;
+  const last = await db.businessDay.findFirst({ where: { date: shopDateString() }, orderBy: { sequence: 'desc' } });
+  if (last?.status === 'CLOSED') {
+    throw new PosError('De kassadag is al afgesloten. Start een nieuwe kassaperiode als je toch nog moet verkopen.');
+  }
+  throw new PosError('Start eerst de kassadag (beginsaldo invoeren)');
 }
 
 // ===========================================================================
@@ -207,7 +235,7 @@ export async function parkOrder(input: { orderId?: string | null; cart: CartRequ
 
 export async function listParkedOrders() {
   return prisma.order.findMany({
-    where: { status: 'PARKED', businessDay: { date: shopDateString() } },
+    where: { status: 'PARKED', businessDay: { status: 'OPEN' } },
     include: { cashier: { select: { name: true, color: true } }, _count: { select: { lines: true } } },
     orderBy: { updatedAt: 'desc' },
   });
@@ -621,7 +649,7 @@ export async function refundCash(input: { creditOrderId: string; amountCents?: n
 
 export async function todaysOrders(limit = 30) {
   return prisma.order.findMany({
-    where: { businessDay: { date: shopDateString() }, number: { not: null } },
+    where: { OR: [{ businessDay: { status: 'OPEN' } }, { businessDay: { date: shopDateString() } }], number: { not: null } },
     include: { cashier: { select: { name: true } }, payments: { where: { status: 'PAID' }, select: { method: true, amountCents: true } } },
     orderBy: { numberedAt: 'desc' },
     take: limit,

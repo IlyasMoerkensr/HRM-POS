@@ -30,6 +30,7 @@ import {
   createCreditOrder,
   discardDraft,
   findOrderForReturn,
+  getOpenDay,
   getOrderForCheckout,
   listParkedOrders,
   loadOrderForCart,
@@ -90,10 +91,11 @@ export async function phoneLogoutAction() {
 //  Kassadag
 // ===========================================================================
 
-export async function startDayAction(openingFloatCents: number) {
+export async function startDayAction(openingFloatCents: number, afterClose = false) {
   return run(async () => {
     const actor = await requireKassaActor();
-    const day = await startBusinessDay(actor.id, openingFloatCents);
+    if (afterClose && actor.role === 'MEDEWERKER') throw new AuthError('Alleen een manager of beheerder kan een nieuwe kassaperiode starten');
+    const day = await startBusinessDay(actor.id, openingFloatCents, { afterClose });
     return { id: day.id, date: day.date };
   });
 }
@@ -347,20 +349,20 @@ export async function phoneStateAction() {
     const [pending, mine, open] = await Promise.all([
       pendingPaymentsForPhone(actor.id),
       prisma.payment.findMany({
-        where: { employeeId: actor.id, method: 'MOLLIE', status: 'PAID', order: { businessDay: { date: shopDateString() } } },
+        where: { employeeId: actor.id, method: 'MOLLIE', status: 'PAID', order: { businessDay: { OR: [{ status: 'OPEN' }, { date: shopDateString() }] } } },
         include: { order: { select: { number: true } } },
         orderBy: { paidAt: 'desc' },
       }),
       prisma.order.findMany({
-        where: { cashierId: actor.id, status: 'PENDING_PAYMENT', businessDay: { date: shopDateString() } },
+        where: { cashierId: actor.id, status: 'PENDING_PAYMENT', businessDay: { status: 'OPEN' } },
         select: { id: true, number: true, totalInclCents: true },
         orderBy: { updatedAt: 'desc' },
       }),
     ]);
-    const day = await prisma.businessDay.findUnique({ where: { date: shopDateString() } });
+    const day = await getOpenDay();
     return {
       me: { id: actor.id, name: actor.name },
-      dayOpen: day?.status === 'OPEN',
+      dayOpen: Boolean(day),
       mollieConfigured: isMollieConfigured(),
       hasPhoneLinked: Boolean((await prisma.user.findUniqueOrThrow({ where: { id: actor.id } })).mollieTerminalId),
       pending: pending.map((p) => ({ id: p.id, orderId: p.orderId, number: p.order.number, amountCents: p.amountCents, createdAt: p.createdAt })),

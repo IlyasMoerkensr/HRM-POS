@@ -17,10 +17,10 @@ export default async function DagafsluitingPage() {
   const user = activeId ? await prisma.user.findUnique({ where: { id: activeId } }) : null;
   if (!user) redirect('/kassa');
 
-  // Oudste nog open dag eerst (vergeten Z-rapport), anders vandaag
-  const day = await prisma.businessDay.findFirst({ where: { status: 'OPEN' }, orderBy: { date: 'asc' } });
+  // De lopende kassaperiode (er is er hoogstens één open)
+  const day = await prisma.businessDay.findFirst({ where: { status: 'OPEN' }, orderBy: { openedAt: 'asc' } });
   if (!day) {
-    const today = await prisma.businessDay.findUnique({ where: { date: shopDateString() }, include: { zReport: true } });
+    const today = await prisma.businessDay.findFirst({ where: { date: shopDateString() }, orderBy: { sequence: 'desc' }, include: { zReport: true } });
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-lg">{today?.zReport ? `Vandaag is al afgesloten met ${today.zReport.number}.` : 'Er is geen open kassadag om af te sluiten.'}</p>
@@ -45,6 +45,7 @@ export default async function DagafsluitingPage() {
       canClose={user.role !== 'MEDEWERKER'}
       mollieConfigured={isMollieConfigured()}
       isToday={day.date === shopDateString()}
+      sequence={day.sequence}
     />
   );
 }

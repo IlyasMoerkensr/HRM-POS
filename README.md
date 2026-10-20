@@ -87,6 +87,10 @@ Zonder Mollie-sleutel werkt pinnen ook: de medewerker tikt het bedrag in de Moll
 5. **Controle**: kasverschil (bij een verschil is een toelichting verplicht) en de pincontrole per medewerker. Met een Mollie-sleutel vergelijkt de kassa dit automatisch met Mollie; anders vergelijk je met de Mollie Tap-app op elke telefoon.
 6. **Dag afsluiten** → het Z-rapport verschijnt. Druk het af of sla het op als PDF voor de boekhouder.
 
+**Wat is “een dag”?** Een kassadag loopt van *Dag starten* tot het Z-rapport, niet van middernacht tot middernacht. Ben je na 00:00 nog open, dan loopt de kassadag gewoon door en sluit je hem af als je klaar bent. De volgende dag begint zodra iemand weer *Dag starten* doet. Het beginsaldo wordt alvast ingevuld met wat er bij de laatste afsluiting is geteld.
+
+**Per ongeluk afgesloten?** Het Z-rapport blijft altijd staan (dat hoort zo voor de boekhouding). Een manager of beheerder klikt in het venster “Kassadag afgesloten” op **Nieuwe kassaperiode starten**. Alles wat je daarna verkoopt komt op een tweede Z-rapport voor dezelfde datum (“periode 2”), dat je aan het eind van de dag gewoon afsluit. In de export staan beide als aparte regels.
+
 Alleen een **manager** of **beheerder** kan de dag afsluiten. Daarna kan er die dag niets meer worden aangeslagen en is het Z-rapport onwijzigbaar. Alle Z-rapporten staan onder **Dag → Eerdere Z-rapporten**.
 
 ## Export voor de boekhouder
