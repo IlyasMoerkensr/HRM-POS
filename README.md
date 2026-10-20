@@ -13,8 +13,7 @@ Kassasysteem dat lokaal op de kassa-pc draait (net als het rooster), met:
 - **Kasmutaties**: wisselgeld bijvullen of afromen naar de kluis, met naam en reden
 - **Dagafsluiting (Z-rapport)**: blinde kastelling per munt/biljet, kasverschil, pincontrole per medewerker, btw-specificatie; daarna staat de dag op slot
 - **Automatische backups** en een nachtelijke controle kassa ↔ Mollie
-
-> Komt nog: de export voor de boekhouder (CSV/Excel/PDF per dag en maand, Mollie-uitbetalingen en -kosten).
+- **Export voor de boekhouder**: Excel/CSV/PDF per maand of periode met btw-specificatie, journaalposten, bonnenlijst en Mollie-uitbetalingen met kosten
 
 ---
 
@@ -89,6 +88,26 @@ Zonder Mollie-sleutel werkt pinnen ook: de medewerker tikt het bedrag in de Moll
 
 Alleen een **manager** of **beheerder** kan de dag afsluiten. Daarna kan er die dag niets meer worden aangeslagen en is het Z-rapport onwijzigbaar. Alle Z-rapporten staan onder **Dag → Eerdere Z-rapporten**.
 
+## Export voor de boekhouder
+
+Klik op **Dag → Export** (of Beheer → Export). Kies een maand of periode.
+
+- **Alles in één Excel-bestand**: tabbladen Dagoverzicht, Btw-specificatie, Bonnenlijst, Journaalposten en Mollie-uitbetalingen.
+- Losse **CSV**-bestanden (openen direct in Excel) voor boekhoudpakketten die CSV inlezen.
+- **Maandrapport afdrukken / PDF**: overzicht met omzet, btw per tarief (rubriek 1a/1b), kas, pin per dag en de Mollie-tussenrekening.
+
+Alleen **afgesloten dagen** (met Z-rapport) komen in de export, zodat cijfers nooit meer veranderen.
+
+**Journaalposten** (per dag, boekstuk = Z-nummer): contant op 1000 Kas, pin op 1150 Tussenrekening Mollie, omzet en btw per tarief, plus kasverschillen (8990) en afromen/bijvullen (1090). Per Mollie-uitbetaling: bank (1100), transactiekosten (4610) en btw op kosten (1520) tegen 1150. Zo staat 1150 op nul zodra Mollie alles heeft uitbetaald.
+
+De rekeningnummers pas je aan in **Beheer → Grootboek**, zodat ze aansluiten op het schema van de boekhouder.
+
+**Mollie-uitbetalingen en kosten** ophalen: zet een organisatie-token in `.env`:
+```
+MOLLIE_ORG_ACCESS_TOKEN="access_..."
+```
+(Mollie Dashboard → Developers → Organisatie-tokens, recht *settlements.read*.) Klik daarna op de exportpagina op **Uitbetalingen ophalen bij Mollie**.
+
 ## Backups
 
 - Automatisch bij elke start en elke 4 uur in de map `backups` (laatste 90 worden bewaard).
@@ -112,10 +131,11 @@ Sluit het zwarte kassavenster en dubbelklik **`update.bat`**. Die maakt eerst ee
 | `prisma/migrations/` | Databasewijzigingen, incl. triggers die afgeronde administratie beschermen |
 | `src/lib/orders/` | Bonberekening (btw per tarief), afrekenen, contant, retour, kasmutaties |
 | `src/lib/reports/` | Dagoverzicht (X), dagafsluiting en Z-rapport |
+| `src/lib/export/` | Boekhoudexport: journaalposten, btw, CSV en Excel |
 | `src/lib/mollie/mollieService.ts` | Mollie Tap to Pay: betaling naar telefoon, status, retour, dagcontrole, uitbetalingen |
 | `src/lib/hardware/cashDrawer.ts` | USB-kassalade via Web Serial (Chrome/Edge) |
 | `src/lib/auth/session.ts` | Koppelen van de kassa-pc, medewerker-wissel, inloggen op telefoon |
-| `src/app/kassa`, `telefoon`, `beheer`, `dagafsluiting`, `rapporten` | De schermen |
+| `src/app/kassa`, `telefoon`, `beheer`, `dagafsluiting`, `rapporten`, `export` | De schermen |
 | `scripts/`, `start.bat`, `update.bat` | Starten en bijwerken op Windows |
 
 Ontwikkelen: `npm install`, `node scripts/setup.mjs`, `npx prisma migrate deploy`, `npx prisma db seed`, `npm run dev`.

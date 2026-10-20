@@ -15,12 +15,13 @@ const COLOR = /^#[0-9a-f]{6}$/i;
 export async function adminDataAction() {
   return run(async () => {
     await requireAdmin();
-    const [users, products, categories, vatRates, settings] = await Promise.all([
+    const [users, products, categories, vatRates, settings, ledger] = await Promise.all([
       prisma.user.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
       prisma.product.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
       prisma.category.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
       prisma.vatRate.findMany({ where: { active: true }, orderBy: { rateBp: 'desc' } }),
       getSettings(),
+      prisma.ledgerAccount.findMany({ orderBy: { code: 'asc' } }),
     ]);
     return {
       users: users.map((u) => ({
@@ -32,7 +33,8 @@ export async function adminDataAction() {
         vatRateId: p.vatRateId, openPrice: p.openPrice, favorite: p.favorite, active: p.active, sortOrder: p.sortOrder, color: p.color,
       })),
       categories: categories.map((c) => ({ id: c.id, name: c.name, color: c.color, sortOrder: c.sortOrder, active: c.active })),
-      vatRates: vatRates.map((v) => ({ id: v.id, code: v.code, name: v.name, rateBp: v.rateBp })),
+      vatRates: vatRates.map((v) => ({ id: v.id, code: v.code, name: v.name, rateBp: v.rateBp, revenueAccountCode: v.revenueAccountCode, vatAccountCode: v.vatAccountCode })),
+      ledger: ledger.map((a) => ({ code: a.code, name: a.name, purpose: a.purpose, active: a.active })),
       settings,
       mollieConfigured: isMollieConfigured(),
     };
@@ -199,6 +201,31 @@ export async function saveSettingsAction(values: Record<string, string>) {
       await prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
       await audit(prisma, { action: 'SETTING_CHANGED', userId: admin.id, entity: 'Setting', entityId: key, data: { from: before[key] ?? null, to: value } });
     }
+    return true as const;
+  });
+}
+
+// ---------------------------------------------------------------- grootboek
+
+/**
+ * Rekeningnummer of -naam aanpassen aan het schema van de boekhouder.
+ * De koppeling met de btw-tarieven verhuist automatisch mee.
+ * Oude bonnen houden hun rekeningnummer (snapshot); exports gebruiken het nieuwe nummer.
+ */
+export async function saveLedgerAccountAction(input: { oldCode: string; code: string; name: string }) {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const code = input.code.trim();
+    const name = input.name.trim();
+    if (!/^[0-9A-Za-z.\-]{1,12}$/.test(code)) throw new PosError('Rekeningnummer: 1 tot 12 cijfers/letters');
+    if (!name || name.length > 80) throw new PosError('Vul een rekeningnaam in');
+    const existing = await prisma.ledgerAccount.findUnique({ where: { code: input.oldCode } });
+    if (!existing) throw new PosError('Rekening niet gevonden');
+    if (code !== input.oldCode && (await prisma.ledgerAccount.findUnique({ where: { code } }))) {
+      throw new PosError(`Rekeningnummer ${code} bestaat al`);
+    }
+    await prisma.ledgerAccount.update({ where: { code: input.oldCode }, data: { code, name } });
+    await audit(prisma, { action: 'LEDGER_CHANGED', userId: admin.id, entity: 'LedgerAccount', entityId: code, data: { from: { code: existing.code, name: existing.name }, to: { code, name } } });
     return true as const;
   });
 }

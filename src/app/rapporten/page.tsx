@@ -22,6 +22,9 @@ export default async function RapportenPage() {
           ← Kassa
         </Link>
         <h1 className="text-lg font-bold">Z-rapporten</h1>
+        <Link href="/export" className="ml-auto rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold">
+          Export voor de boekhouder
+        </Link>
       </header>
       <main className="mx-auto max-w-5xl p-4">
         {reports.length === 0 ? (

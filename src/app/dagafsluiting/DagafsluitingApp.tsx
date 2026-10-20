@@ -83,6 +83,11 @@ export function DagafsluitingApp({
         <Link href="/rapporten" className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">
           Eerdere Z-rapporten
         </Link>
+        {canClose && (
+          <Link href="/export" className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">
+            Export
+          </Link>
+        )}
       </header>
 
       <main className="mx-auto max-w-5xl space-y-4 p-4">

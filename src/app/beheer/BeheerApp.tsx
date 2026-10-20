@@ -8,6 +8,7 @@ import {
   linkTerminalAction,
   listTerminalsAction,
   saveCategoryAction,
+  saveLedgerAccountAction,
   saveProductAction,
   saveSettingsAction,
   saveUserAction,
@@ -20,7 +21,7 @@ import { formatKickCode, getCashDrawer, parseKickCode } from '@/lib/hardware/cas
 import { formatEuroInput, parseEuroInput } from '@/lib/money';
 
 type Data = Extract<Awaited<ReturnType<typeof adminDataAction>>, { ok: true }>['data'];
-type Tab = 'medewerkers' | 'producten' | 'categorieen' | 'kassalade' | 'algemeen';
+type Tab = 'medewerkers' | 'producten' | 'categorieen' | 'kassalade' | 'grootboek' | 'algemeen';
 
 const ROLES = { MEDEWERKER: 'Medewerker', MANAGER: 'Manager (retouren)', ADMIN: 'Beheerder' } as const;
 
@@ -50,6 +51,7 @@ export function BeheerApp() {
     ['producten', 'Producten'],
     ['categorieen', 'Categorieën'],
     ['kassalade', 'Kassalade'],
+    ['grootboek', 'Grootboek'],
     ['algemeen', 'Algemeen'],
   ];
 
@@ -60,6 +62,9 @@ export function BeheerApp() {
           ← Kassa
         </Link>
         <h1 className="text-lg font-bold">Beheer</h1>
+        <Link href="/export" className="order-last ml-auto rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">
+          Export
+        </Link>
         <nav className="flex gap-1 overflow-x-auto">
           {tabs.map(([t, label]) => (
             <button key={t} type="button" onClick={() => setTab(t)} className={cx('rounded-lg px-3 py-2 font-semibold whitespace-nowrap', tab === t ? 'bg-white text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>
@@ -81,6 +86,8 @@ export function BeheerApp() {
           <CategoriesTab data={data} onError={setError} onDone={done} />
         ) : tab === 'kassalade' ? (
           <DrawerTab data={data} onError={setError} onDone={done} />
+        ) : tab === 'grootboek' ? (
+          <LedgerTab key={JSON.stringify(data.ledger)} data={data} onError={setError} onDone={done} />
         ) : (
           <GeneralTab data={data} onError={setError} onDone={done} />
         )}
@@ -599,6 +606,80 @@ function GeneralTab({ data, onError, onDone }: TabProps) {
       >
         Opslaan
       </Button>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- grootboek
+
+const PURPOSE: Record<string, string> = {
+  CASH: 'Kas (contant geld)',
+  CASH_TRANSFER: 'Kas onderweg / kluis (afromen en bijvullen)',
+  BANK: 'Bank (Mollie-uitbetalingen)',
+  MOLLIE_CLEARING: 'Tussenrekening Mollie (pinomzet)',
+  VAT_RECEIVABLE: 'Voorbelasting (btw op Mollie-kosten)',
+  VAT_PAYABLE: 'Af te dragen btw',
+  PAYMENT_FEES: 'Transactiekosten Mollie',
+  REVENUE: 'Omzet',
+  CASH_DIFFERENCE: 'Kasverschillen',
+};
+
+function LedgerTab({ data, onError, onDone }: TabProps) {
+  const [rows, setRows] = useState(() => data.ledger.map((a) => ({ ...a, newCode: a.code, newName: a.name })));
+  return (
+    <section className="space-y-4">
+      <p className="text-slate-600">
+        Pas de rekeningnummers aan het rekeningschema van je boekhouder aan. De exports en journaalposten gebruiken deze nummers. Bonnen die al zijn afgerekend
+        houden hun oorspronkelijke nummer in de bon zelf.
+      </p>
+      <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Functie</th>
+              <th>Nummer</th>
+              <th>Naam</th>
+              <th className="px-3" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r, i) => {
+              const changed = r.newCode !== r.code || r.newName !== r.name;
+              return (
+                <tr key={r.code}>
+                  <td className="px-3 py-2 text-slate-600">{PURPOSE[r.purpose] ?? r.purpose}</td>
+                  <td className="py-2 pr-2">
+                    <input className={cx(input, 'w-28 font-mono')} value={r.newCode} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, newCode: e.target.value } : x)))} />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input className={input} value={r.newName} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, newName: e.target.value } : x)))} />
+                  </td>
+                  <td className="px-3">
+                    <Button size="sm" variant="primary" disabled={!changed} onClick={async () => {
+                      const res = await saveLedgerAccountAction({ oldCode: r.code, code: r.newCode, name: r.newName });
+                      if (!res.ok) return onError(res.error);
+                      await onDone(`Rekening ${r.newCode} opgeslagen`);
+                    }}>
+                      Opslaan
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+        <h2 className="mb-2 font-bold">Btw-tarieven</h2>
+        <ul className="space-y-1 text-sm">
+          {data.vatRates.map((v) => (
+            <li key={v.id}>
+              {v.name}: omzet op <span className="font-mono">{v.revenueAccountCode}</span>
+              {v.vatAccountCode && <>, btw op <span className="font-mono">{v.vatAccountCode}</span></>}
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }
