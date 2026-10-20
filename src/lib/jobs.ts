@@ -33,6 +33,13 @@ export function startBackgroundJobs() {
     console.log(`[mollie-controle] ${yesterday}: ${result.status}, verschil ${result.differenceCents} cent`);
   });
 
+  const bundled = safe('producten', async () => {
+    const { importBundledProducts } = await import('./import/bundled');
+    const result = await importBundledProducts();
+    if (result) console.log(`[producten] producten.csv ingelezen: ${result}`);
+  });
+
+  void bundled();
   setTimeout(backup, 5_000);
   setInterval(backup, 4 * 3600 * 1000);
   setTimeout(reconcile, 60_000);

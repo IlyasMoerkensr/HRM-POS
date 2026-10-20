@@ -230,6 +230,12 @@ model Product {
   color          String?
   sortOrder      Int      @default(0)
   active         Boolean  @default(true)
+  /// Productfoto (verkleind tot max. 512 px, WebP/JPEG/PNG). In de database,
+  /// zodat de foto's automatisch in de backups zitten.
+  imageData      Bytes?
+  imageMime      String?
+  /// Wordt opgehoogd bij elke nieuwe foto (voor de browsercache)
+  imageVersion   Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

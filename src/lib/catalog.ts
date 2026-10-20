@@ -6,6 +6,7 @@ export async function loadCatalog(): Promise<{ products: PosProduct[]; categorie
   const [products, categories] = await Promise.all([
     prisma.product.findMany({
       where: { active: true },
+      omit: { imageData: true },
       include: { vatRate: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     }),
@@ -26,6 +27,7 @@ export async function loadCatalog(): Promise<{ products: PosProduct[]; categorie
       openPrice: p.openPrice,
       favorite: p.favorite,
       color: p.color,
+      imageUrl: p.imageVersion > 0 && p.imageMime ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null,
     })),
     categories: categories.map((c) => ({ id: c.id, name: c.name, color: c.color })),
   };

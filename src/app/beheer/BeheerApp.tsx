@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   adminDataAction,
+  applyImportAction,
+  previewImportAction,
+  removeProductImageAction,
+  saveProductImageAction,
   linkTerminalAction,
   listTerminalsAction,
   saveCategoryAction,
@@ -16,6 +20,7 @@ import {
   type ProductInput,
   type UserInput,
 } from '@/app/actions/admin';
+import { resizeImage } from '@/components/imageResize';
 import { Button, cx, ErrorBox, Modal, Money } from '@/components/ui';
 import { formatKickCode, getCashDrawer, parseKickCode } from '@/lib/hardware/cashDrawer';
 import { formatEuroInput, parseEuroInput } from '@/lib/money';
@@ -310,8 +315,17 @@ function PhoneDialog({ user, mollieConfigured, onClose, onError, onDone }: { use
 // ---------------------------------------------------------------- producten
 
 function ProductsTab({ data, onError, onDone }: TabProps) {
-  const [editing, setEditing] = useState<(ProductInput & { priceText: string }) | null>(null);
+  const [editing, setEditing] = useState<(ProductInput & { priceText: string; imageUrl?: string | null }) | null>(null);
+  const [photo, setPhoto] = useState<{ blob: Blob | null; preview: string | null; remove: boolean }>({ blob: null, preview: null, remove: false });
+  const [importOpen, setImportOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('');
+
+  const openEditor = (value: (ProductInput & { priceText: string; imageUrl?: string | null }) | null) => {
+    if (photo.preview) URL.revokeObjectURL(photo.preview);
+    setPhoto({ blob: null, preview: null, remove: false });
+    setEditing(value);
+  };
   const vatById = new Map(data.vatRates.map((v) => [v.id, v]));
   const catById = new Map(data.categories.map((c) => [c.id, c]));
   const list = data.products.filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()));
@@ -325,7 +339,8 @@ function ProductsTab({ data, onError, onDone }: TabProps) {
     <section className="space-y-3">
       <div className="flex gap-2">
         <input className={input} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Zoeken…" />
-        <Button variant="primary" onClick={() => setEditing(blank())}>
+        <Button className="whitespace-nowrap" onClick={() => setImportOpen(true)}>Importeren (CSV)</Button>
+        <Button variant="primary" className="whitespace-nowrap" onClick={() => openEditor(blank())}>
           + Product
         </Button>
       </div>
@@ -333,7 +348,8 @@ function ProductsTab({ data, onError, onDone }: TabProps) {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
-              <th className="px-3 py-2">Product</th>
+              <th className="w-14 px-3 py-2">Foto</th>
+              <th className="py-2">Product</th>
               <th>Categorie</th>
               <th>Btw</th>
               <th className="text-right">Prijs incl.</th>
@@ -343,7 +359,15 @@ function ProductsTab({ data, onError, onDone }: TabProps) {
           <tbody className="divide-y divide-slate-100">
             {list.map((p) => (
               <tr key={p.id} className={cx(!p.active && 'text-slate-400')}>
-                <td className="px-3 py-2">
+                <td className="px-3 py-1.5">
+                  {p.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.imageUrl} alt="" className="h-10 w-10 rounded-lg bg-white object-contain ring-1 ring-slate-200" />
+                  ) : (
+                    <span className="block h-10 w-10 rounded-lg bg-slate-100" />
+                  )}
+                </td>
+                <td className="py-2">
                   {p.favorite && '★ '}
                   {p.name}
                   {!p.active && ' (uit)'}
@@ -352,7 +376,7 @@ function ProductsTab({ data, onError, onDone }: TabProps) {
                 <td>{vatById.get(p.vatRateId)?.name}</td>
                 <td className="text-right">{p.openPrice ? 'vrij' : <Money cents={p.priceInclCents} />}</td>
                 <td className="px-3 text-right">
-                  <Button size="sm" onClick={() => setEditing({ ...p, priceText: formatEuroInput(p.priceInclCents) })}>
+                  <Button size="sm" onClick={() => openEditor({ ...p, priceText: formatEuroInput(p.priceInclCents) })}>
                     Wijzigen
                   </Button>
                 </td>
@@ -365,23 +389,54 @@ function ProductsTab({ data, onError, onDone }: TabProps) {
       {editing && (
         <Modal
           title={editing.id ? 'Product wijzigen' : 'Nieuw product'}
-          onClose={() => setEditing(null)}
+          onClose={() => openEditor(null)}
           wide
           footer={
-            <Button variant="primary" className="w-full" onClick={async () => {
+            <Button variant="primary" className="w-full" disabled={saving} onClick={async () => {
               const cents = editing.openPrice && !editing.priceText ? 0 : parseEuroInput(editing.priceText);
               if (cents === null) return onError('Ongeldige prijs, gebruik bijv. 3,50');
-              const { priceText: _ignored, ...rest } = editing;
+              const { priceText: _ignored, imageUrl: _img, ...rest } = editing;
               void _ignored;
-              const r = await saveProductAction({ ...rest, priceInclCents: cents });
-              if (!r.ok) return onError(r.error);
-              setEditing(null);
-              await onDone('Product opgeslagen');
+              void _img;
+              setSaving(true);
+              try {
+                const r = await saveProductAction({ ...rest, priceInclCents: cents });
+                if (!r.ok) return onError(r.error);
+                if (photo.blob) {
+                  const form = new FormData();
+                  form.append('foto', photo.blob, 'foto');
+                  const up = await saveProductImageAction(r.data.id, form);
+                  if (!up.ok) return onError(`Product opgeslagen, maar foto niet: ${up.error}`);
+                } else if (photo.remove && editing.id) {
+                  const rm = await removeProductImageAction(editing.id);
+                  if (!rm.ok) return onError(rm.error);
+                }
+                openEditor(null);
+                await onDone('Product opgeslagen');
+              } finally {
+                setSaving(false);
+              }
             }}>
-              Opslaan
+              {saving ? 'Opslaan…' : 'Opslaan'}
             </Button>
           }
         >
+          <PhotoField
+            current={photo.remove ? null : photo.preview ?? editing.imageUrl ?? null}
+            onPick={async (file) => {
+              try {
+                const blob = await resizeImage(file);
+                if (photo.preview) URL.revokeObjectURL(photo.preview);
+                setPhoto({ blob, preview: URL.createObjectURL(blob), remove: false });
+              } catch (err) {
+                onError(err instanceof Error ? err.message : String(err));
+              }
+            }}
+            onRemove={() => {
+              if (photo.preview) URL.revokeObjectURL(photo.preview);
+              setPhoto({ blob: null, preview: null, remove: Boolean(editing.imageUrl) });
+            }}
+          />
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Naam">
               <input className={input} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} maxLength={80} autoFocus />
@@ -425,6 +480,7 @@ function ProductsTab({ data, onError, onDone }: TabProps) {
           </div>
         </Modal>
       )}
+      {importOpen && <ImportDialog onClose={() => setImportOpen(false)} onError={onError} onDone={onDone} />}
     </section>
   );
 }
@@ -681,5 +737,160 @@ function LedgerTab({ data, onError, onDone }: TabProps) {
         </ul>
       </div>
     </section>
+  );
+}
+
+function PhotoField({ current, onPick, onRemove }: { current: string | null; onPick: (file: File) => void; onRemove: () => void }) {
+  return (
+    <div className="mb-4 flex items-center gap-4">
+      {current ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={current} alt="" className="h-28 w-28 rounded-xl bg-white object-contain ring-1 ring-slate-200" />
+      ) : (
+        <div className="flex h-28 w-28 items-center justify-center rounded-xl bg-slate-100 text-center text-xs text-slate-500">Geen foto</div>
+      )}
+      <div className="space-y-2">
+        <label className="inline-flex cursor-pointer items-center rounded-xl bg-white px-4 py-2.5 font-semibold ring-1 ring-slate-300 hover:bg-slate-50">
+          {current ? 'Andere foto kiezen' : 'Foto kiezen'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onPick(file);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {current && (
+          <button type="button" onClick={onRemove} className="block text-sm text-rose-700 underline">
+            Foto verwijderen
+          </button>
+        )}
+        <p className="text-xs text-slate-500">JPG, PNG of WebP. Wordt automatisch verkleind. Wordt opgeslagen bij “Opslaan”.</p>
+      </div>
+    </div>
+  );
+}
+
+type Preview = Extract<Awaited<ReturnType<typeof previewImportAction>>, { ok: true }>['data'];
+
+function ImportDialog({ onClose, onError, onDone }: { onClose: () => void; onError: (e: string) => void; onDone: (m: string) => Promise<void> }) {
+  const [csv, setCsv] = useState<string | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [applyLedger, setApplyLedger] = useState(true);
+  const [hideDemo, setHideDemo] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async (file: File) => {
+    setError(null);
+    setPreview(null);
+    const text = await file.text();
+    setCsv(text);
+    setFileName(file.name);
+    const r = await previewImportAction(text);
+    if (!r.ok) return setError(r.error);
+    setPreview(r.data);
+  };
+
+  const counts = preview ? { nieuw: preview.rows.filter((r) => r.action === 'nieuw').length, bijwerken: preview.rows.filter((r) => r.action === 'bijwerken').length } : null;
+  const VAT: Record<string, string> = { HOOG: '21%', LAAG: '9%', NUL: '0%' };
+
+  return (
+    <Modal
+      title="Producten importeren (CSV)"
+      onClose={onClose}
+      wide
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={!preview || !csv || busy || (counts?.nieuw ?? 0) + (counts?.bijwerken ?? 0) === 0}
+          onClick={async () => {
+            setBusy(true);
+            const r = await applyImportAction(csv!, { applyLedger: applyLedger && (preview?.ledgerChanges.length ?? 0) > 0, hideDemoProducts: hideDemo });
+            setBusy(false);
+            if (!r.ok) return onError(r.error);
+            onClose();
+            await onDone(`Import klaar: ${r.data.created} nieuw, ${r.data.updated} bijgewerkt${r.data.skipped ? `, ${r.data.skipped} overgeslagen` : ''}`);
+          }}
+        >
+          {counts ? `Importeren: ${counts.nieuw} nieuw, ${counts.bijwerken} bijwerken` : 'Importeren'}
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center hover:bg-slate-100">
+          <span className="font-semibold">{fileName || 'Kies een CSV-bestand'}</span>
+          <span className="text-sm text-slate-500">Bijvoorbeeld een export uit je vorige kassasysteem (kolommen zoals Title, Incl VAT price, VAT %, Product category)</span>
+          <input type="file" accept=".csv,text/csv,text/plain" className="sr-only" onChange={(e) => e.target.files?.[0] && load(e.target.files[0])} />
+        </label>
+        <ErrorBox message={error} />
+
+        {preview && (
+          <>
+            <div className="max-h-80 overflow-y-auto rounded-xl ring-1 ring-slate-200">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-left text-slate-500">
+                  <tr>
+                    <th className="px-3 py-1.5">Product</th>
+                    <th>Categorie</th>
+                    <th className="text-right">Prijs</th>
+                    <th className="px-2">Btw</th>
+                    <th>Actie</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {preview.rows.map((r) => (
+                    <tr key={r.line} className={cx(r.action === 'ongewijzigd' && 'text-slate-400')}>
+                      <td className="px-3 py-1.5">
+                        {r.name}
+                        {r.warnings.map((w) => (
+                          <div key={w} className="text-xs text-amber-700">⚠ {w}</div>
+                        ))}
+                      </td>
+                      <td>{r.category ?? '—'}</td>
+                      <td className="text-right">
+                        <Money cents={r.priceInclCents} />
+                        {r.current && r.current.priceInclCents !== r.priceInclCents && (
+                          <div className="text-xs text-slate-500">was <Money cents={r.current.priceInclCents} /></div>
+                        )}
+                      </td>
+                      <td className="px-2">{VAT[r.vatCode]}</td>
+                      <td>{r.action}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {preview.skipped.length > 0 && (
+              <ul className="rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-900">
+                {preview.skipped.map((x) => (
+                  <li key={x.line}>Regel {x.line} overgeslagen: {x.reason}</li>
+                ))}
+              </ul>
+            )}
+            {preview.ledgerChanges.length > 0 && (
+              <label className="flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm">
+                <input type="checkbox" checked={applyLedger} onChange={(e) => setApplyLedger(e.target.checked)} className="mt-1" />
+                <span>
+                  Omzetrekeningen uit het bestand overnemen:{' '}
+                  {preview.ledgerChanges.map((l) => `${l.title} ${l.currentCode} → ${l.code}`).join(', ')}
+                </span>
+              </label>
+            )}
+            {preview.demoProducts.length > 0 && (
+              <label className="flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm">
+                <input type="checkbox" checked={hideDemo} onChange={(e) => setHideDemo(e.target.checked)} className="mt-1" />
+                <span>Voorbeeldproducten van de installatie verbergen ({preview.demoProducts.join(', ')})</span>
+              </label>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }

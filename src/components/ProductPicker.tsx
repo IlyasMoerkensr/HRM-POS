@@ -22,7 +22,10 @@ export function ProductPicker({
   compact?: boolean;
 }) {
   const hasFavorites = products.some((p) => p.favorite);
-  const [tab, setTab] = useState<string>(hasFavorites ? FAVORITES : categories[0]?.id ?? '');
+  // Lege categorieën niet tonen
+  categories = categories.filter((c) => products.some((p) => p.categoryId === c.id));
+  // Zonder favorieten start de kassa op "Alles"
+  const [tab, setTab] = useState<string>(hasFavorites ? FAVORITES : '');
   const [query, setQuery] = useState('');
 
   const visible = useMemo(() => {
@@ -38,6 +41,8 @@ export function ProductPicker({
   }, [products, tab, query]);
 
   const catColor = new Map(categories.map((c) => [c.id, c.color]));
+  // Zodra er foto's zijn: alle tegels even groot, producten zonder foto krijgen hun initialen
+  const withImages = visible.some((p) => p.imageUrl);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -81,7 +86,32 @@ export function ProductPicker({
           <div className={cx('grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]')}>
             {visible.map((p) => {
               const color = p.color ?? (p.categoryId ? catColor.get(p.categoryId) : undefined) ?? '#64748b';
-              return (
+              return withImages ? (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onPick(p)}
+                  className="flex flex-col overflow-hidden rounded-xl bg-white text-left shadow-sm ring-1 ring-slate-200 transition active:scale-[0.97] active:bg-slate-50"
+                  style={{ borderTop: `5px solid ${color}` }}
+                >
+                  {p.imageUrl ? (
+                    <span className="block aspect-[4/3] w-full bg-white p-1.5">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.imageUrl} alt="" loading="lazy" draggable={false} className="h-full w-full object-contain" />
+                    </span>
+                  ) : (
+                    <span aria-hidden="true" className="flex aspect-[4/3] w-full items-center justify-center" style={{ backgroundColor: `${color}14` }}>
+                      <span className="text-3xl font-extrabold tracking-tight opacity-70" style={{ color }}>
+                        {initials(p.shortName || p.name)}
+                      </span>
+                    </span>
+                  )}
+                  <span className="flex flex-1 flex-col justify-between gap-1 border-t border-slate-100 px-2.5 py-2">
+                    <span className="line-clamp-2 text-sm leading-tight font-semibold">{p.shortName || p.name}</span>
+                    <span className="tabular text-sm text-slate-600">{p.openPrice ? 'Vrij bedrag' : formatEUR(p.priceInclCents)}</span>
+                  </span>
+                </button>
+              ) : (
                 <button
                   key={p.id}
                   type="button"
@@ -112,4 +142,10 @@ function Tab({ active, color, onClick, children }: { active: boolean; color: str
       {children}
     </button>
   );
+}
+
+/** "Protein Shake Banaan" → "PS", "T-Shirt" → "TS" */
+function initials(name: string): string {
+  const words = name.replace(/[^\p{L}\p{N}\s-]/gu, '').split(/[\s-]+/).filter(Boolean);
+  return (words.length >= 2 ? words[0][0] + words[1][0] : (words[0] ?? '?').slice(0, 2)).toUpperCase();
 }

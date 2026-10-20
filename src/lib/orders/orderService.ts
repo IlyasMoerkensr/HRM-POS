@@ -94,7 +94,7 @@ async function buildLines(db: Db, cart: CartRequest, cashierId: string) {
   if (cart.lines.length > 200) throw new PosError('Te veel regels op één bon');
 
   const productIds = [...new Set(cart.lines.map((l) => l.productId))];
-  const products = await db.product.findMany({ where: { id: { in: productIds } }, include: { vatRate: true } });
+  const products = await db.product.findMany({ where: { id: { in: productIds } }, omit: { imageData: true }, include: { vatRate: true } });
   const byId = new Map(products.map((p) => [p.id, p]));
 
   const lines: CartLineInput[] = cart.lines.map((l) => {

@@ -2,7 +2,7 @@
 
 Kassasysteem dat lokaal op de kassa-pc draait (net als het rooster), met:
 
-- **Kassascherm** voor de pc: producttegels, zoeken, favorieten, korting (% of €), opmerkingen, parkeren
+- **Kassascherm** voor de pc: producttegels met foto, zoeken, favorieten, korting (% of €), opmerkingen, parkeren
 - **5 medewerkers** met snelwissel bovenin (optioneel met pincode)
 - **Contant** met snelknoppen en wisselgeld; de **USB-kassalade** gaat alleen open bij contant
 - **Pin via Mollie Tap to Pay** op de telefoon van de medewerker: bedrag automatisch naar de telefoon sturen, of handmatig bevestigen
@@ -46,7 +46,8 @@ Kassasysteem dat lokaal op de kassa-pc draait (net als het rooster), met:
 2. Kies **Medewerker 1** (dat is de beheerder), vul het **beginsaldo** van de lade in.
 3. Klik rechtsboven op **Beheer**:
    - **Medewerkers:** namen invullen, pincodes instellen, rol kiezen (Manager mag retouren doen).
-   - **Producten / Categorieën:** eigen assortiment invoeren. Laat de btw-tarieven controleren door de boekhouder.
+   - **Producten / Categorieën:** eigen assortiment invoeren, met foto (knop **Foto kiezen** bij een product). Laat de btw-tarieven controleren door de boekhouder.
+     De producten uit `prisma/producten.csv` worden bij de eerste start automatisch ingelezen. Een nieuwe lijst (bijv. uit een ander kassasysteem) lees je in met **Importeren (CSV)**.
    - **Kassalade:** klik op **Test**, kies de COM-poort van de lade. Gaat hij open? Dan **Opslaan**.
 4. Op de kassa: klik op **Lade koppelen** (bovenin) als die nog grijs is.
 

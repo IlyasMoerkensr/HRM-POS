@@ -14,6 +14,8 @@ export interface PosProduct {
   openPrice: boolean;
   favorite: boolean;
   color: string | null;
+  /** Foto-URL (met versie), of null zonder foto */
+  imageUrl: string | null;
 }
 
 export interface PosCategory {
