@@ -44,7 +44,7 @@ export interface KassaProps {
   categories: PosCategory[];
   users: PosUser[];
   activeUserId: string | null;
-  day: { date: string; status: 'OPEN' | 'CLOSED' } | null;
+  day: { date: string; status: 'OPEN' | 'CLOSED'; zReport: { id: string; number: string } | null } | null;
   unclosedDays: string[];
   drawer: DrawerSettings;
   mollieConfigured: boolean;
@@ -257,7 +257,14 @@ export function KassaApp(props: KassaProps) {
       </main>
 
       {/* ------------------------------------------------ dialogen */}
-      {(!props.day || props.day.status !== 'OPEN') && <DayStartDialog day={props.day} onStarted={() => router.refresh()} />}
+      {(!props.day || props.day.status !== 'OPEN') && (
+        <DayStartDialog
+          day={props.day}
+          role={active.role}
+          onStarted={() => router.refresh()}
+          onSwitch={() => guard(async () => { await logoutEmployeeAction(); setActiveUserId(null); })}
+        />
+      )}
 
       {switchTo && (
         <PinPrompt
@@ -515,17 +522,60 @@ function PinPrompt({ user, onClose, onOk }: { user: PosUser; onClose: () => void
   );
 }
 
-function DayStartDialog({ day, onStarted }: { day: KassaProps['day']; onStarted: () => void }) {
+function DayStartDialog({
+  day,
+  role,
+  onStarted,
+  onSwitch,
+}: {
+  day: KassaProps['day'];
+  role: PosUser['role'];
+  onStarted: () => void;
+  onSwitch: () => void;
+}) {
   const [digits, setDigits] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Snelkoppelingen die altijd bereikbaar blijven, ook vóór de start of na het afsluiten
+  const links = (
+    <div className="flex flex-wrap gap-2">
+      {role === 'ADMIN' && (
+        <Link href="/beheer" className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
+          ⚙ Beheer
+        </Link>
+      )}
+      <Link href="/rapporten" className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
+        Z-rapporten
+      </Link>
+      {role !== 'MEDEWERKER' && (
+        <Link href="/export" className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
+          Export
+        </Link>
+      )}
+      <button type="button" onClick={onSwitch} className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
+        Andere medewerker
+      </button>
+    </div>
+  );
+
   if (day?.status === 'CLOSED') {
     return (
       <Modal title="Kassadag afgesloten">
-        <p className="mb-4">De kassa is vandaag al afgesloten met een Z-rapport. Morgen kun je een nieuwe dag starten.</p>
-        <Link href="/rapporten" className="inline-block rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white">
-          Z-rapporten bekijken
-        </Link>
+        <div className="space-y-4">
+          <p>
+            Vandaag is afgesloten{day.zReport ? ` met ${day.zReport.number}` : ''}. Er kan vandaag niets meer worden aangeslagen; dat houdt de administratie sluitend.
+          </p>
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-slate-700">
+            <strong>Morgen</strong> start je hier gewoon een nieuwe dag: open de kassa, kies je naam en vul het beginsaldo in.
+          </p>
+          {day.zReport && (
+            <Link href={`/rapporten/z/${day.zReport.id}`} className="inline-block rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">
+              Z-rapport van vandaag bekijken
+            </Link>
+          )}
+          {links}
+        </div>
       </Modal>
     );
   }
@@ -551,6 +601,7 @@ function DayStartDialog({ day, onStarted }: { day: KassaProps['day']; onStarted:
       }
     >
       <p className="mb-3 text-slate-600">Tel het wisselgeld in de lade en vul het beginsaldo in.</p>
+      <div className="mb-3">{links}</div>
       <div className="mb-3 rounded-xl bg-slate-50 px-4 py-4 text-right text-4xl font-bold">{formatEUR(digitsToCents(digits))}</div>
       <NumPad value={digits} onChange={setDigits} />
       <div className="mt-3">
