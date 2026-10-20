@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { cashMovementAction } from '@/app/actions/day';
 import {
   checkoutAction,
   confirmDrawerAction,
@@ -50,7 +51,7 @@ export interface KassaProps {
   defaultPinMode: 'API' | 'MANUAL';
 }
 
-type Dialog = 'parked' | 'park' | 'nosale' | 'return' | 'recent' | 'clear' | null;
+type Dialog = 'parked' | 'park' | 'nosale' | 'return' | 'recent' | 'clear' | 'cash' | null;
 
 export function KassaApp(props: KassaProps) {
   const router = useRouter();
@@ -162,7 +163,7 @@ export function KassaApp(props: KassaProps) {
     <div className="flex h-dvh flex-col">
       {/* ------------------------------------------------ bovenbalk */}
       <header className="flex items-center gap-3 bg-slate-900 px-3 py-2 text-white">
-        <div className="hidden pr-2 font-bold lg:block">{props.companyName}</div>
+        <div className="hidden shrink-0 pr-2 font-bold 2xl:block">{props.companyName}</div>
         <nav className="flex flex-1 gap-1.5 overflow-x-auto">
           {props.users.map((u) => (
             <button
@@ -177,7 +178,7 @@ export function KassaApp(props: KassaProps) {
                   setActiveUserId(u.id);
                 });
               }}
-              className={cx('min-w-24 rounded-xl px-3 py-2.5 font-semibold whitespace-nowrap transition', u.id === activeUserId ? 'ring-2 ring-white ring-inset' : 'bg-slate-800 text-slate-300 hover:bg-slate-700')}
+              className={cx('min-w-24 shrink-0 rounded-xl px-3 py-2.5 font-semibold whitespace-nowrap transition', u.id === activeUserId ? 'ring-2 ring-white ring-inset' : 'bg-slate-800 text-slate-300 hover:bg-slate-700')}
               style={u.id === activeUserId ? { backgroundColor: u.color, color: textOn(u.color) } : undefined}
             >
               {u.name}
@@ -191,6 +192,12 @@ export function KassaApp(props: KassaProps) {
         <Button size="sm" variant="ghost" className="text-white hover:bg-slate-800" onClick={() => setDialog('recent')}>
           Bonnen
         </Button>
+        <Button size="sm" variant="ghost" className="text-white hover:bg-slate-800" onClick={() => setDialog('cash')}>
+          Kas
+        </Button>
+        <Link href="/dagafsluiting" className="rounded-xl px-3 py-1.5 text-sm font-semibold hover:bg-slate-800">
+          Dag
+        </Link>
         {active.role !== 'MEDEWERKER' && (
           <Button size="sm" variant="ghost" className="text-white hover:bg-slate-800" onClick={() => setDialog('return')}>
             Retour
@@ -395,6 +402,19 @@ export function KassaApp(props: KassaProps) {
 
       {dialog === 'recent' && <RecentDialog onClose={() => setDialog(null)} />}
 
+      {dialog === 'cash' && (
+        <CashMovementDialog
+          onClose={() => setDialog(null)}
+          onSave={async (type, amountCents, reason) => {
+            const r = await cashMovementAction({ type, amountCents, reason });
+            if (!r.ok) return r.error;
+            await kickForMovement(r.data.movementId);
+            setDialog(null);
+            return null;
+          }}
+        />
+      )}
+
       {dialog === 'return' && (
         <ReturnDialog
           onClose={() => setDialog(null)}
@@ -502,7 +522,10 @@ function DayStartDialog({ day, onStarted }: { day: KassaProps['day']; onStarted:
   if (day?.status === 'CLOSED') {
     return (
       <Modal title="Kassadag afgesloten">
-        <p>De kassa is vandaag al afgesloten met een Z-rapport. Morgen kun je een nieuwe dag starten.</p>
+        <p className="mb-4">De kassa is vandaag al afgesloten met een Z-rapport. Morgen kun je een nieuwe dag starten.</p>
+        <Link href="/rapporten" className="inline-block rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white">
+          Z-rapporten bekijken
+        </Link>
       </Modal>
     );
   }
@@ -848,6 +871,59 @@ function ReturnDialog({ onClose, onDone, onCashMovement }: { onClose: () => void
             })}
           </div>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+function CashMovementDialog({ onClose, onSave }: { onClose: () => void; onSave: (type: 'CASH_IN' | 'CASH_OUT', amountCents: number, reason: string) => Promise<string | null> }) {
+  const [type, setType] = useState<'CASH_IN' | 'CASH_OUT'>('CASH_OUT');
+  const [digits, setDigits] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const amount = digitsToCents(digits);
+  const presets = type === 'CASH_OUT' ? ['Afromen naar kluis', 'Storting bank', 'Contante uitgave'] : ['Wisselgeld uit kluis', 'Wisselgeld van bank'];
+  return (
+    <Modal
+      title="Kasmutatie"
+      onClose={onClose}
+      footer={
+        <Button
+          variant={type === 'CASH_OUT' ? 'warning' : 'primary'}
+          size="lg"
+          className="w-full"
+          disabled={busy || amount <= 0 || reason.trim().length < 3}
+          onClick={async () => {
+            setBusy(true);
+            setError(await onSave(type, amount, reason));
+            setBusy(false);
+          }}
+        >
+          {type === 'CASH_OUT' ? `${formatEUR(amount)} uit de lade halen` : `${formatEUR(amount)} in de lade doen`}
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+          {(['CASH_OUT', 'CASH_IN'] as const).map((t) => (
+            <button key={t} type="button" onClick={() => { setType(t); setReason(''); }} className={cx('rounded-lg py-2.5 font-bold', type === t ? 'bg-white shadow' : 'text-slate-600')}>
+              {t === 'CASH_OUT' ? 'Afromen (eruit)' : 'Bijvullen (erin)'}
+            </button>
+          ))}
+        </div>
+        <div className="rounded-xl bg-slate-50 px-4 py-3 text-right text-4xl font-bold">{formatEUR(amount)}</div>
+        <NumPad value={digits} onChange={setDigits} />
+        <div className="flex flex-wrap gap-2">
+          {presets.map((p) => (
+            <Button key={p} size="sm" onClick={() => setReason(p)}>
+              {p}
+            </Button>
+          ))}
+        </div>
+        <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} className="w-full rounded-xl border border-slate-300 px-3 py-3" placeholder="Reden (verplicht)" />
+        <ErrorBox message={error} />
+        <p className="text-sm text-slate-500">De lade gaat open en de mutatie wordt vastgelegd met jouw naam.</p>
       </div>
     </Modal>
   );

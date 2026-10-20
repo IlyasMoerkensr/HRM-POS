@@ -10,9 +10,11 @@ Kassasysteem dat lokaal op de kassa-pc draait (net als het rooster), met:
 - **Telefoonweergave** voor medewerkers: zelf een bon aanslaan en pinnen op de eigen telefoon
 - **Beheer**: medewerkers, pincodes, telefoons koppelen, producten, categorieën, kassalade-instellingen
 - **Onwijzigbare administratie**: doorlopende bonnummers, afgeronde bonnen kunnen niet meer veranderd of verwijderd worden, alles wordt gelogd
+- **Kasmutaties**: wisselgeld bijvullen of afromen naar de kluis, met naam en reden
+- **Dagafsluiting (Z-rapport)**: blinde kastelling per munt/biljet, kasverschil, pincontrole per medewerker, btw-specificatie; daarna staat de dag op slot
 - **Automatische backups** en een nachtelijke controle kassa ↔ Mollie
 
-> Komt nog: dagafsluiting (Z-rapport met kastelling), kasmutaties en de export voor de boekhouder.
+> Komt nog: de export voor de boekhouder (CSV/Excel/PDF per dag en maand, Mollie-uitbetalingen en -kosten).
 
 ---
 
@@ -74,6 +76,18 @@ Zonder Mollie-sleutel werkt pinnen ook: de medewerker tikt het bedrag in de Moll
 - Begin van de dag: beginsaldo invullen.
 - **Lade** (bovenin): lade openen zonder verkoop, altijd met reden (wordt vastgelegd).
 - **Bonnen**: alle bonnen van vandaag. **Retour**: creditbon maken (alleen manager/beheerder).
+- **Kas**: wisselgeld bijvullen of geld afromen naar de kluis. De lade gaat open en het wordt vastgelegd.
+
+## Dagafsluiting (einde van de dag)
+
+1. Room eerst het geld af dat naar de kluis gaat (**Kas** → Afromen), zodat alleen het wisselgeld voor morgen in de lade blijft.
+2. Klik bovenin op **Dag**. Je ziet de tussenstand: omzet, btw, contant, pin en per medewerker.
+3. Staan er nog open of geparkeerde bonnen? Reken die af of verwijder ze.
+4. **Kas tellen**: vul per munt en biljet het aantal in. Het verwachte bedrag zie je pas daarna (eerlijke telling).
+5. **Controle**: kasverschil (bij een verschil is een toelichting verplicht) en de pincontrole per medewerker. Met een Mollie-sleutel vergelijkt de kassa dit automatisch met Mollie; anders vergelijk je met de Mollie Tap-app op elke telefoon.
+6. **Dag afsluiten** → het Z-rapport verschijnt. Druk het af of sla het op als PDF voor de boekhouder.
+
+Alleen een **manager** of **beheerder** kan de dag afsluiten. Daarna kan er die dag niets meer worden aangeslagen en is het Z-rapport onwijzigbaar. Alle Z-rapporten staan onder **Dag → Eerdere Z-rapporten**.
 
 ## Backups
 
@@ -96,11 +110,12 @@ Sluit het zwarte kassavenster en dubbelklik **`update.bat`**. Die maakt eerst ee
 |---|---|
 | `prisma/schema.prisma` | Databaseschema (alle bedragen in centen) |
 | `prisma/migrations/` | Databasewijzigingen, incl. triggers die afgeronde administratie beschermen |
-| `src/lib/orders/` | Bonberekening (btw per tarief), afrekenen, contant, retour |
+| `src/lib/orders/` | Bonberekening (btw per tarief), afrekenen, contant, retour, kasmutaties |
+| `src/lib/reports/` | Dagoverzicht (X), dagafsluiting en Z-rapport |
 | `src/lib/mollie/mollieService.ts` | Mollie Tap to Pay: betaling naar telefoon, status, retour, dagcontrole, uitbetalingen |
 | `src/lib/hardware/cashDrawer.ts` | USB-kassalade via Web Serial (Chrome/Edge) |
 | `src/lib/auth/session.ts` | Koppelen van de kassa-pc, medewerker-wissel, inloggen op telefoon |
-| `src/app/kassa`, `telefoon`, `beheer` | De schermen |
+| `src/app/kassa`, `telefoon`, `beheer`, `dagafsluiting`, `rapporten` | De schermen |
 | `scripts/`, `start.bat`, `update.bat` | Starten en bijwerken op Windows |
 
 Ontwikkelen: `npm install`, `node scripts/setup.mjs`, `npx prisma migrate deploy`, `npx prisma db seed`, `npm run dev`.

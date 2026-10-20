@@ -434,6 +434,31 @@ export async function registerNoSale(userId: string, reason: string) {
   });
 }
 
+/**
+ * Kasmutatie: wisselgeld bijvullen (CASH_IN) of afromen naar de kluis (CASH_OUT).
+ * Bedrag altijd positief invoeren; reden verplicht.
+ */
+export async function registerCashMovement(input: { userId: string; type: 'CASH_IN' | 'CASH_OUT'; amountCents: number; reason: string }) {
+  const why = input.reason.trim();
+  if (why.length < 3) throw new PosError('Vul een reden in (minimaal 3 tekens)');
+  if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) throw new PosError('Vul een bedrag in');
+  if (input.amountCents > 10_000_00) throw new PosError('Bedrag is onwaarschijnlijk hoog; controleer de invoer');
+  return prisma.$transaction(async (tx) => {
+    const day = await requireOpenToday(tx);
+    if (input.type === 'CASH_OUT') {
+      const inDrawer = await tx.cashMovement.aggregate({ where: { businessDayId: day.id }, _sum: { amountCents: true } });
+      const available = inDrawer._sum.amountCents ?? 0;
+      if (input.amountCents > available) throw new PosError(`Er zit volgens de kassa maar ${formatEUR(available)} in de lade`);
+    }
+    const amount = input.type === 'CASH_IN' ? input.amountCents : -input.amountCents;
+    const movement = await tx.cashMovement.create({
+      data: { businessDayId: day.id, type: input.type, amountCents: amount, userId: input.userId, reason: why.slice(0, 200) },
+    });
+    await audit(tx, { action: input.type, userId: input.userId, entity: 'CashMovement', entityId: movement.id, data: { amountCents: amount, reason: why } });
+    return { movementId: movement.id };
+  });
+}
+
 // ===========================================================================
 //  Retour / creditbon
 // ===========================================================================
