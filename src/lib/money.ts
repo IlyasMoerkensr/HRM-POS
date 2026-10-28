@@ -48,6 +48,30 @@ export function parseMollieAmount(amount: { value: string; currency?: string } |
 }
 
 /**
+ * Mollie-bedrag met meer decimalen, in 1/10000 euro. Mollie geeft bij
+ * uitbetalingen (vooral transactiekosten) bedragen als "0.5000" of "0.1234".
+ * Optellen in deze eenheid en daarna pas afronden voorkomt centverschillen.
+ */
+export function parseMollieAmountPrecise(amount: { value: string; currency?: string } | string): number {
+  const raw = typeof amount === 'string' ? amount : amount.value;
+  if (typeof amount !== 'string' && amount.currency && amount.currency !== 'EUR') {
+    throw new Error(`Onverwachte valuta van Mollie: ${amount.currency}`);
+  }
+  const match = /^(-)?(\d+)(?:\.(\d{1,4}))?$/.exec(raw.trim());
+  if (!match) throw new Error(`Ongeldig Mollie-bedrag: ${raw}`);
+  const [, minus, whole, frac = ''] = match;
+  const units = Number(whole) * 10000 + Number(frac.padEnd(4, '0'));
+  return minus ? -units : units;
+}
+
+/** 1/10000 euro → centen, half-om-hoog (weg van nul). */
+export function preciseToCents(units: number): Cents {
+  const abs = Math.abs(units);
+  const cents = Math.floor(abs / 100) + (abs % 100 >= 50 ? 1 : 0);
+  return units < 0 ? -cents : cents;
+}
+
+/**
  * Btw uit een bedrag inclusief btw. 21% = 2100 basispunten.
  * btw = incl × tarief / (100% + tarief), afgerond op centen.
  */

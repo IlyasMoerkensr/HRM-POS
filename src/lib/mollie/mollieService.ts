@@ -43,7 +43,7 @@ import createMollieClient, { MollieApiError, PaymentMethod, type MollieClient } 
 import type { PaymentStatus as DbPaymentStatus, Prisma } from '@prisma/client';
 
 import { audit } from '../audit';
-import { formatEUR, parseMollieAmount, toMollieAmount } from '../money';
+import { formatEUR, parseMollieAmount, parseMollieAmountPrecise, preciseToCents, toMollieAmount } from '../money';
 import { ensureOrderNumber } from '../orders/orderService';
 import { remainingToPay, settleOrderIfFullyPaid } from '../orders/settle';
 import { prisma } from '../prisma';
@@ -1225,27 +1225,29 @@ export async function syncSettlements(since: Date, linkPayments = true): Promise
       continue;
     }
 
-    const lines: Omit<Prisma.MollieSettlementLineCreateManyInput, 'settlementId'>[] = [];
+    // Mollie geeft hier bedragen met tot 4 decimalen: exact optellen, daarna afronden.
+    type Line = { kind: 'revenue' | 'cost'; period: string; method: string; description: string; count: number; net: number; vat: number; gross: number };
+    const precise: Line[] = [];
     for (const [year, months] of Object.entries(s.periods ?? {})) {
       for (const [month, period] of Object.entries(months)) {
         const periodKey = `${year}-${String(month).padStart(2, '0')}`;
-        for (const r of period.revenue ?? []) {
-          lines.push({
-            kind: 'revenue', period: periodKey, method: r.method, description: r.description, count: r.count,
-            netCents: parseMollieAmount(r.amountNet), vatCents: r.amountVat ? parseMollieAmount(r.amountVat) : 0, grossCents: parseMollieAmount(r.amountGross),
-          });
-        }
-        for (const c of period.costs ?? []) {
-          lines.push({
-            kind: 'cost', period: periodKey, method: c.method, description: c.description, count: c.count,
-            netCents: parseMollieAmount(c.amountNet), vatCents: c.amountVat ? parseMollieAmount(c.amountVat) : 0, grossCents: parseMollieAmount(c.amountGross),
-          });
+        for (const [kind, rows] of [['revenue', period.revenue ?? []], ['cost', period.costs ?? []]] as const) {
+          for (const r of rows) {
+            precise.push({
+              kind, period: periodKey, method: String(r.method ?? ''), description: r.description ?? '', count: r.count,
+              net: parseMollieAmountPrecise(r.amountNet), vat: r.amountVat ? parseMollieAmountPrecise(r.amountVat) : 0, gross: parseMollieAmountPrecise(r.amountGross),
+            });
+          }
         }
       }
     }
-    const revenue = lines.filter((l) => l.kind === 'revenue');
-    const costs = lines.filter((l) => l.kind === 'cost');
-    const sum = (rows: typeof lines, k: 'netCents' | 'vatCents' | 'grossCents') => rows.reduce((t, r) => t + r[k], 0);
+    const lines: Omit<Prisma.MollieSettlementLineCreateManyInput, 'settlementId'>[] = precise.map((l) => ({
+      kind: l.kind, period: l.period, method: l.method, description: l.description, count: l.count,
+      netCents: preciseToCents(l.net), vatCents: preciseToCents(l.vat), grossCents: preciseToCents(l.gross),
+    }));
+    const total = (kind: Line['kind'], k: 'net' | 'vat' | 'gross') => preciseToCents(precise.filter((l) => l.kind === kind).reduce((t, l) => t + l[k], 0));
+    const costsNetCents = total('cost', 'net');
+    const costsVatCents = total('cost', 'vat');
 
     await prisma.$transaction(async (tx) => {
       const data = {
@@ -1253,11 +1255,12 @@ export async function syncSettlements(since: Date, linkPayments = true): Promise
         status: s.status,
         createdAt,
         settledAt: s.settledAt ? new Date(s.settledAt) : null,
-        amountCents: parseMollieAmount(s.amount),
-        revenueGrossCents: sum(revenue, 'grossCents'),
-        costsGrossCents: sum(costs, 'grossCents'),
-        costsNetCents: sum(costs, 'netCents'),
-        costsVatCents: sum(costs, 'vatCents'),
+        amountCents: preciseToCents(parseMollieAmountPrecise(s.amount)),
+        revenueGrossCents: total('revenue', 'gross'),
+        // Zo sluit de journaalpost altijd: kosten incl. = excl. + btw
+        costsGrossCents: costsNetCents + costsVatCents,
+        costsNetCents,
+        costsVatCents,
         invoiceId: s.invoiceId ?? null,
         syncedAt: new Date(),
       };
