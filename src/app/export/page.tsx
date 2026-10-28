@@ -5,6 +5,7 @@ import { getReportAccess } from '@/lib/auth/access';
 import { clearingSummary, dayRows, loadPeriod, monthPeriod, parsePeriod, VAT_LABEL, VAT_RUBRIEK, vatTotals, type Period } from '@/lib/export/accounting';
 import { EXPORT_KINDS } from '@/lib/export/build';
 import { formatEUR } from '@/lib/money';
+import { hasOrgAccessToken } from '@/lib/mollie/mollieService';
 import { getSetting } from '@/lib/settings';
 import { shopDateString } from '@/lib/time';
 
@@ -30,7 +31,7 @@ export default async function ExportPage({ searchParams }: { searchParams: Promi
     period = monthPeriod(shopDateString().slice(0, 7));
   }
 
-  const [data, company, orgToken] = await Promise.all([loadPeriod(period), getSetting('company.name', 'Kassa'), Promise.resolve(Boolean(process.env.MOLLIE_ORG_ACCESS_TOKEN))]);
+  const [data, company, orgToken] = await Promise.all([loadPeriod(period), getSetting('company.name', 'Kassa'), Promise.resolve(hasOrgAccessToken())]);
   const days = dayRows(data);
   const vat = vatTotals(data);
   const clearing = clearingSummary(data);
@@ -173,7 +174,7 @@ export default async function ExportPage({ searchParams }: { searchParams: Promi
             <div className="mb-2"><MollieSyncButton from={period.from} /></div>
             {!orgToken && (
               <p className="mb-2 text-sm text-slate-500 print:hidden">
-                Voor uitbetalingen en kosten is een Mollie “advanced access token” nodig (Mollie Dashboard → Developers → API keys; zet hem als MOLLIE_ORG_ACCESS_TOKEN in .env, met leesrecht op settlements).
+                Voor uitbetalingen en kosten is een Mollie “advanced access token” nodig (Mollie Dashboard → Developers → API keys, met de rechten settlements.read en payments.read). Zet hem in .env als MOLLIE_ORG_ACCESS_TOKEN en herstart daarna de kassa: een wijziging in .env telt pas na een herstart.
               </p>
             )}
             <table className="w-full text-sm">

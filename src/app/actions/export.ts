@@ -4,7 +4,7 @@ import { run } from '@/lib/actionResult';
 import { getReportAccess } from '@/lib/auth/access';
 import { AuthError } from '@/lib/auth/session';
 import { audit } from '@/lib/audit';
-import { mollieErrorMessage, syncSettlements } from '@/lib/mollie/mollieService';
+import { settlementErrorMessage, syncSettlements } from '@/lib/mollie/mollieService';
 import { PosError } from '@/lib/orders/orderService';
 import { prisma } from '@/lib/prisma';
 import { shopDayRange } from '@/lib/time';
@@ -17,17 +17,17 @@ export async function syncSettlementsAction(fromDate: string) {
     // Een maand eerder beginnen: uitbetalingen lopen een paar dagen achter
     const since = new Date(shopDayRange(fromDate).from.getTime() - 31 * 24 * 3600 * 1000);
     try {
-      const ids = await syncSettlements(since);
+      const r = await syncSettlements(since);
       await audit(prisma, {
         action: 'MOLLIE_SETTLEMENTS_SYNCED',
         userId: access.via === 'kassa' ? access.userId : null,
         accountId: access.via === 'account' ? access.account.id : null,
-        data: { since: since.toISOString(), count: ids.length },
+        data: { since: since.toISOString(), count: r.synced.length, open: r.openCount, linkWarning: r.linkWarning },
       });
-      return { count: ids.length };
+      return { count: r.synced.length, openCount: r.openCount, linkWarning: r.linkWarning };
     } catch (err) {
-      if (err instanceof Error && err.name === 'MollieNotConfiguredError') throw err;
-      throw new PosError(`Uitbetalingen ophalen mislukt: ${mollieErrorMessage(err)}`);
+      if (err instanceof Error && err.name === 'MollieNotConfiguredError') throw new PosError(err.message);
+      throw new PosError(`Uitbetalingen ophalen mislukt: ${settlementErrorMessage(err)}`);
     }
   });
 }

@@ -124,7 +124,7 @@ De rekeningnummers pas je aan in **Beheer → Grootboek**, zodat ze aansluiten o
 ```
 MOLLIE_ORG_ACCESS_TOKEN="access_..."
 ```
-Zo maak je hem: Mollie Dashboard → **Developers** → **API keys** → *advanced access token* aanmaken (of direct via https://my.mollie.com/dashboard/developers/api-access-tokens). Vink het leesrecht voor **settlements** aan (en eventueel balances). Alleen een gebruiker met de rol **Admin** in Mollie kan dit. Het token begint met `access_`. Start de kassa daarna opnieuw en klik op de exportpagina op **Uitbetalingen ophalen bij Mollie**.
+Zo maak je hem: Mollie Dashboard → **Developers** → **API keys** → *advanced access token* aanmaken (of direct via https://my.mollie.com/dashboard/developers/api-access-tokens). Vink de leesrechten **settlements.read** én **payments.read** aan. Alleen een gebruiker met de rol **Admin** in Mollie kan dit. Het token begint met `access_`. Start de kassa daarna opnieuw (kassa-icoon → *Kassa afsluiten* → `HRM-Kassa.exe`; een wijziging in `.env` telt pas na een herstart) en klik op de exportpagina op **Uitbetalingen ophalen bij Mollie**. Zolang er alleen testbetalingen zijn geweest, vindt Mollie geen uitbetalingen: die ontstaan pas na echte betalingen.
 
 ## Inloggen voor beheer en boekhouder (ook op afstand)
 

@@ -76,9 +76,22 @@ export function getMollieConfig(): MollieConfig {
     apiKey,
     testMode: apiKey.startsWith('test_'),
     webhookBaseUrl,
-    orgAccessToken: process.env.MOLLIE_ORG_ACCESS_TOKEN || null,
+    orgAccessToken: readOrgAccessToken(),
   };
 }
+
+/** Token uit .env, zonder spaties of aanhalingstekens die bij kopiëren/plakken kunnen meekomen. */
+function readOrgAccessToken(): string | null {
+  const raw = (process.env.MOLLIE_ORG_ACCESS_TOKEN ?? '').trim().replace(/^["']+|["']+$/g, '').trim();
+  return raw || null;
+}
+
+/** Staat er een advanced access token in .env? (los van de gewone API-sleutel) */
+export function hasOrgAccessToken(): boolean {
+  return readOrgAccessToken() !== null;
+}
+
+const RESTART_HINT = 'Herstart daarna de kassa (kassa-icoon rechtsonder → Kassa afsluiten, dan HRM-Kassa.exe opnieuw openen).';
 
 /** Is er een (geldige) Mollie API-sleutel ingesteld? Zonder sleutel alleen modus C. */
 export function isMollieConfigured(): boolean {
@@ -111,14 +124,61 @@ function client(): MollieClient {
 }
 
 function organizationClient(): MollieClient {
-  const { orgAccessToken } = getMollieConfig();
-  if (!orgAccessToken) {
+  const token = readOrgAccessToken();
+  if (!token) {
     throw new MollieNotConfiguredError(
-      'MOLLIE_ORG_ACCESS_TOKEN ontbreekt. Maak in het Mollie Dashboard (Developers → API keys) een “advanced access token” met leesrecht op settlements en zet die in .env.',
+      `MOLLIE_ORG_ACCESS_TOKEN ontbreekt. Maak in het Mollie Dashboard (Developers → API keys) een “advanced access token” met de rechten settlements.read en payments.read en zet die in .env. ${RESTART_HINT}`,
     );
   }
-  if (!orgClient) orgClient = createMollieClient({ accessToken: orgAccessToken, apiEndpoint: apiEndpoint(), versionStrings });
+  if (/^(live|test)_/.test(token)) {
+    throw new MollieNotConfiguredError(
+      'In MOLLIE_ORG_ACCESS_TOKEN staat een gewone API-sleutel (live_… of test_…). Voor uitbetalingen is een “advanced access token” nodig; die begint met access_. Die maak je in het Mollie Dashboard onder Developers → API keys.',
+    );
+  }
+  if (!token.startsWith('access_')) {
+    throw new MollieNotConfiguredError(
+      'MOLLIE_ORG_ACCESS_TOKEN klopt niet: een advanced access token van Mollie begint met access_. Kopieer het token opnieuw (helemaal, zonder spaties).',
+    );
+  }
+  if (!orgClient || orgClientToken !== token) {
+    orgClient = createMollieClient({ accessToken: token, apiEndpoint: apiEndpoint(), versionStrings });
+    orgClientToken = token;
+  }
   return orgClient;
+}
+
+let orgClientToken: string | null = null;
+let cachedProfileId: string | null = null;
+
+/**
+ * Profiel-ID van de Mollie-website. Mollie eist dit bij een advanced access token
+ * om de betalingen binnen een uitbetaling op te vragen. Volgorde: MOLLIE_PROFILE_ID
+ * in .env, anders opvragen met de gewone API-sleutel (die hoort bij één profiel).
+ */
+async function settlementProfileId(): Promise<string | null> {
+  const fromEnv = process.env.MOLLIE_PROFILE_ID?.trim().replace(/^["']+|["']+$/g, '');
+  if (fromEnv) return fromEnv;
+  if (cachedProfileId) return cachedProfileId;
+  if (!isMollieConfigured()) return null;
+  try {
+    cachedProfileId = (await client().profiles.getCurrent()).id;
+    return cachedProfileId;
+  } catch {
+    return null;
+  }
+}
+
+/** Foutmelding voor het ophalen van uitbetalingen: wijst naar het token, niet naar de API-sleutel. */
+export function settlementErrorMessage(err: unknown): string {
+  if (err instanceof MollieApiError) {
+    if (err.statusCode === 401) {
+      return `Mollie accepteert het advanced access token niet (ongeldig, verlopen of ingetrokken). Maak een nieuw token en zet het in .env bij MOLLIE_ORG_ACCESS_TOKEN. ${RESTART_HINT}`;
+    }
+    if (err.statusCode === 403) {
+      return 'Het advanced access token mist rechten. Maak een nieuw token en vink settlements.read (Settlements: lezen) en payments.read (Payments: lezen) aan.';
+    }
+  }
+  return mollieErrorMessage(err);
 }
 
 // ===========================================================================
@@ -1126,14 +1186,31 @@ export async function runDailyReconciliation(now: Date = new Date()) {
  *
  * Vereist MOLLIE_ORG_ACCESS_TOKEN (de gewone API-sleutel heeft geen toegang tot settlements).
  */
-export async function syncSettlements(since: Date, linkPayments = true) {
+export interface SettlementSyncResult {
+  /** Bijgewerkte (afgeronde) uitbetalingen */
+  synced: string[];
+  /** Uitbetalingen die Mollie nog aan het opbouwen is (worden later opgehaald) */
+  openCount: number;
+  /** Uitbetalingen staan erin, maar koppelen aan kassabetalingen lukte niet */
+  linkWarning: string | null;
+}
+
+export async function syncSettlements(since: Date, linkPayments = true): Promise<SettlementSyncResult> {
   const mollie = organizationClient();
   const synced: string[] = [];
+  let openCount = 0;
+  let linkWarning: string | null = null;
+  const profileId = linkPayments ? await settlementProfileId() : null;
 
+  // Niet afbreken op datum: Mollie belooft geen sorteervolgorde. Een kleine zaak heeft
+  // hooguit een paar honderd uitbetalingen, dus alles doorlopen is geen probleem.
   for await (const s of mollie.settlements.iterate()) {
     const createdAt = new Date(s.createdAt);
-    if (createdAt < since) break;
-    if (s.status === 'open') continue; // nog lopend: bedragen veranderen nog
+    if (createdAt < since) continue;
+    if (s.status === 'open') {
+      openCount++; // nog lopend: bedragen veranderen nog
+      continue;
+    }
 
     const lines: Omit<Prisma.MollieSettlementLineCreateManyInput, 'settlementId'>[] = [];
     for (const [year, months] of Object.entries(s.periods ?? {})) {
@@ -1176,21 +1253,28 @@ export async function syncSettlements(since: Date, linkPayments = true) {
       if (lines.length) await tx.mollieSettlementLine.createMany({ data: lines.map((l) => ({ ...l, settlementId: s.id })) });
     });
 
-    if (linkPayments) {
-      const ids: string[] = [];
-      for await (const p of mollie.settlementPayments.iterate({ settlementId: s.id })) {
-        if (String(p.method) === PaymentMethod.pointofsale) ids.push(p.id);
-      }
-      if (ids.length) {
-        await prisma.payment.updateMany({
-          where: { OR: [{ molliePaymentId: { in: ids } }, { reconciledMolliePaymentId: { in: ids } }] },
-          data: { mollieSettlementId: s.id },
-        });
+    // Kassabetalingen aan de uitbetaling koppelen. Dit is extra: de bedragen en kosten
+    // hierboven zijn al opgeslagen, dus een fout hier laat de rest niet mislukken.
+    if (linkPayments && !linkWarning) {
+      try {
+        const ids: string[] = [];
+        for await (const p of mollie.settlementPayments.iterate({ settlementId: s.id, ...(profileId ? { profileId } : {}) })) {
+          if (String(p.method) === PaymentMethod.pointofsale) ids.push(p.id);
+        }
+        if (ids.length) {
+          await prisma.payment.updateMany({
+            where: { OR: [{ molliePaymentId: { in: ids } }, { reconciledMolliePaymentId: { in: ids } }] },
+            data: { mollieSettlementId: s.id },
+          });
+        }
+      } catch (err) {
+        console.warn('[mollie] betalingen per uitbetaling ophalen mislukt:', err);
+        linkWarning = settlementErrorMessage(err);
       }
     }
     synced.push(s.id);
   }
-  return synced;
+  return { synced, openCount, linkWarning };
 }
 
 /** Overzicht voor de boekhouder: per maand bruto, kosten en netto uitbetaald. */
