@@ -16,7 +16,7 @@
     "db:deploy": "prisma migrate deploy"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "node node_modules/tsx/dist/cli.mjs prisma/seed.ts"
   },
   "dependencies": {
     "@mollie/api-client": "4.6.0",
