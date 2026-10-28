@@ -137,7 +137,12 @@ function organizationClient(): MollieClient {
   }
   if (!token.startsWith('access_')) {
     throw new MollieNotConfiguredError(
-      'MOLLIE_ORG_ACCESS_TOKEN klopt niet: een advanced access token van Mollie begint met access_. Kopieer het token opnieuw (helemaal, zonder spaties).',
+      `MOLLIE_ORG_ACCESS_TOKEN klopt niet: een advanced access token van Mollie begint met access_ (nu: ${tokenFingerprint(token)}). Kopieer het token opnieuw (helemaal, zonder spaties).`,
+    );
+  }
+  if (/[^A-Za-z0-9_]/.test(token)) {
+    throw new MollieNotConfiguredError(
+      `MOLLIE_ORG_ACCESS_TOKEN bevat tekens die niet in een Mollie-token horen, zoals spaties, puntjes of sterretjes (nu: ${tokenFingerprint(token)}). Waarschijnlijk is de ingekorte versie uit het overzicht gekopieerd. Mollie toont het volledige token maar één keer, direct na het aanmaken: maak een nieuw token en kopieer het met de kopieerknop.`,
     );
   }
   if (!orgClient || orgClientToken !== token) {
@@ -168,11 +173,19 @@ async function settlementProfileId(): Promise<string | null> {
   }
 }
 
+/** Begin, eind en lengte van het token, om te vergelijken met het Mollie Dashboard zonder het hele token te tonen. */
+function tokenFingerprint(token: string): string {
+  if (token.length <= 14) return `${token.length} tekens`;
+  return `${token.slice(0, 10)}…${token.slice(-4)}, ${token.length} tekens`;
+}
+
 /** Foutmelding voor het ophalen van uitbetalingen: wijst naar het token, niet naar de API-sleutel. */
 export function settlementErrorMessage(err: unknown): string {
   if (err instanceof MollieApiError) {
     if (err.statusCode === 401) {
-      return `Mollie accepteert het advanced access token niet (ongeldig, verlopen of ingetrokken). Maak een nieuw token en zet het in .env bij MOLLIE_ORG_ACCESS_TOKEN. ${RESTART_HINT}`;
+      const token = readOrgAccessToken();
+      const used = token ? ` De kassa gebruikt nu: ${tokenFingerprint(token)}.` : '';
+      return `Mollie accepteert het advanced access token niet (onvolledig gekopieerd, verwijderd of verlopen).${used} Maak in Mollie een nieuw token, kopieer het meteen met de kopieerknop (Mollie toont het maar één keer) en zet het in .env bij MOLLIE_ORG_ACCESS_TOKEN. ${RESTART_HINT}`;
     }
     if (err.statusCode === 403) {
       return 'Het advanced access token mist rechten. Maak een nieuw token en vink settlements.read (Settlements: lezen) en payments.read (Payments: lezen) aan.';
