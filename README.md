@@ -144,6 +144,15 @@ De kassa draait op de pc in de zaak. Om de boekhouder er vanaf internet bij te l
 4. Zet dat adres in `.env`: `PUBLIC_BASE_URL="https://kassa-pc.tail1234.ts.net"` (dan werken ook de Mollie-meldingen direct) en kies in het kassa-icoon *Kassa afsluiten* en start `HRM-Kassa.exe` opnieuw.
 5. Maak in Beheer → Accounts een account voor de boekhouder en geef hem het adres, het e-mailadres en het wachtwoord.
 
+**Liever Cloudflare Tunnel?** Dat kan ook (gratis), als je een eigen domein hebt dat bij Cloudflare is ondergebracht (bijv. `hrmfitness.nl`):
+
+1. Log in op het Cloudflare-dashboard → **Zero Trust** → **Networks** → **Tunnels** → **Create a tunnel** (type *Cloudflared*), naam bijv. `kassa`.
+2. Kies **Windows**. Cloudflare toont een installatiecommando met een token; voer dat uit in PowerShell **als administrator**. De tunnel draait daarna als Windows-service en start vanzelf mee met de pc.
+3. Voeg een **public hostname** toe: subdomein `kassa`, domein `hrmfitness.nl`, service **HTTP** → `localhost:3000`.
+4. Zet in `.env`: `PUBLIC_BASE_URL="https://kassa.hrmfitness.nl"` en herstart de kassa (kassa-icoon → *Kassa afsluiten* → `HRM-Kassa.exe`).
+
+Gebruik geen *quick tunnel* (`trycloudflare.com`): dat adres verandert bij elke herstart.
+
 Via dit adres zijn **alleen** inloggen, Beheer, Z-rapporten en export bereikbaar. De kassa, de telefoonweergave en het koppelen werken alleen op het netwerk van de zaak. De kassa-pc moet aan staan als de boekhouder kijkt.
 
 ## Backups
