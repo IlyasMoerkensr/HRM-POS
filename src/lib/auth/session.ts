@@ -12,9 +12,10 @@
  * Cookies zijn ondertekend met SESSION_SECRET (HMAC), dus niet na te maken.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 
 import { prisma } from '../prisma';
+import { isRemoteRequest } from './network';
 import { hashPin, verifyPin } from './pin';
 
 const DEVICE_COOKIE = 'kassa_device';
@@ -35,13 +36,23 @@ function secret(): string {
   return s;
 }
 
-function sign(payload: object): string {
+/** Komt dit verzoek van buiten het eigen netwerk (bijv. de boekhouder via internet)? */
+export async function isRemote(): Promise<boolean> {
+  return isRemoteRequest(await headers());
+}
+
+/** Kassa- en telefoonfuncties werken alleen op het eigen netwerk. */
+export async function assertLocal() {
+  if (await isRemote()) throw new AuthError('Dit kan alleen op het netwerk van de zaak, niet op afstand');
+}
+
+export function sign(payload: object): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const mac = createHmac('sha256', secret()).update(body).digest('base64url');
   return `${body}.${mac}`;
 }
 
-function verify<T>(token: string | undefined): T | null {
+export function verify<T>(token: string | undefined): T | null {
   if (!token) return null;
   const [body, mac] = token.split('.');
   if (!body || !mac) return null;
@@ -80,7 +91,7 @@ function registerFailure(key: string) {
   attempts.set(key, { count: a && a.until > Date.now() ? a.count + 1 : 1, until });
 }
 
-function pairingCodeMatches(code: string): boolean {
+export function pairingCodeMatches(code: string): boolean {
   const expected = process.env.PAIRING_CODE ?? '';
   if (expected.length < 6) throw new Error('PAIRING_CODE ontbreekt in .env (start de kassa via start.bat)');
   const a = Buffer.from(code.trim());
@@ -93,6 +104,7 @@ function pairingCodeMatches(code: string): boolean {
 // ===========================================================================
 
 export async function pairDevice(code: string) {
+  await assertLocal();
   checkRateLimit('pairing');
   if (!pairingCodeMatches(code)) {
     registerFailure('pairing');
@@ -103,6 +115,7 @@ export async function pairDevice(code: string) {
 }
 
 export async function isPairedDevice(): Promise<boolean> {
+  if (await isRemote()) return false;
   const jar = await cookies();
   return verify<{ kind: string }>(jar.get(DEVICE_COOKIE)?.value)?.kind === 'device';
 }
@@ -145,6 +158,7 @@ export async function getActiveEmployeeId(): Promise<string | null> {
 // ===========================================================================
 
 export async function phoneLogin(input: { userId: string; pin: string; pairingCode?: string; newPin?: string }) {
+  await assertLocal();
   const user = await prisma.user.findUnique({ where: { id: input.userId } });
   if (!user || !user.active) throw new AuthError('Onbekende medewerker');
   checkRateLimit(`phone:${user.id}`);
@@ -174,6 +188,7 @@ export async function phoneLogout() {
 }
 
 export async function getPhoneUserId(): Promise<string | null> {
+  if (await isRemote()) return null;
   const jar = await cookies();
   return verify<{ kind: string; userId: string }>(jar.get(PHONE_COOKIE)?.value)?.userId ?? null;
 }
@@ -212,10 +227,4 @@ export async function requireAnyActor(): Promise<Actor> {
   const activeId = await getActiveEmployeeId();
   if (activeId) return loadActor(activeId, 'kassa');
   return loadActor(await getPhoneUserId(), 'telefoon');
-}
-
-export async function requireAdmin(): Promise<Actor> {
-  const actor = await requireKassaActor();
-  if (actor.role !== 'ADMIN') throw new AuthError('Alleen een beheerder mag dit');
-  return actor;
 }

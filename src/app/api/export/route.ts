@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 
 import { audit } from '@/lib/audit';
-import { AuthError, requireKassaActor } from '@/lib/auth/session';
+import { getReportAccess } from '@/lib/auth/access';
+import { AuthError } from '@/lib/auth/session';
 import { parsePeriod } from '@/lib/export/accounting';
 import { buildSheets, EXPORT_KINDS, type ExportKind } from '@/lib/export/build';
 import { toCsv, toXlsx } from '@/lib/export/formats';
@@ -14,8 +15,8 @@ import { getSetting } from '@/lib/settings';
  */
 export async function GET(request: Request) {
   try {
-    const actor = await requireKassaActor();
-    if (actor.role === 'MEDEWERKER') throw new AuthError('Alleen een manager of beheerder kan exporteren');
+    const access = await getReportAccess({ needManager: true });
+    if (!access) throw new AuthError('Log in om te exporteren');
 
     const url = new URL(request.url);
     const period = parsePeriod(url.searchParams.get('van'), url.searchParams.get('tot'));
@@ -28,7 +29,12 @@ export async function GET(request: Request) {
     const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'kassa';
     const base = `${slug}_${soort}_${period.from}_tm_${period.to}`;
 
-    await audit(prisma, { action: 'EXPORT', userId: actor.id, data: { soort, formaat, ...period } });
+    await audit(prisma, {
+      action: 'EXPORT',
+      userId: access.via === 'kassa' ? access.userId : null,
+      accountId: access.via === 'account' ? access.account.id : null,
+      data: { soort, formaat, ...period },
+    });
 
     if (formaat === 'xlsx') {
       const list = soort === 'alles' ? Object.values(sheets) : [sheets[soort as ExportKind]];

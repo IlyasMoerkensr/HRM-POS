@@ -165,7 +165,7 @@ export async function listPhoneTerminals(): Promise<PhoneTerminal[]> {
   return result;
 }
 
-export async function linkPhoneToUser(userId: string, terminalId: string | null, adminUserId: string, phoneLabel?: string) {
+export async function linkPhoneToUser(userId: string, terminalId: string | null, adminAccountId: string, phoneLabel?: string) {
   if (terminalId) {
     const terminal = await client().terminals.get(terminalId);
     if (terminal.status !== 'active') {
@@ -178,7 +178,7 @@ export async function linkPhoneToUser(userId: string, terminalId: string | null,
       await tx.user.updateMany({ where: { mollieTerminalId: terminalId, NOT: { id: userId } }, data: { mollieTerminalId: null } });
     }
     await tx.user.update({ where: { id: userId }, data: { mollieTerminalId: terminalId, phoneLabel: phoneLabel ?? undefined } });
-    await audit(tx, { action: 'PHONE_LINKED', userId: adminUserId, entity: 'User', entityId: userId, data: { terminalId } });
+    await audit(tx, { action: 'PHONE_LINKED', accountId: adminAccountId, entity: 'User', entityId: userId, data: { terminalId } });
   });
 }
 

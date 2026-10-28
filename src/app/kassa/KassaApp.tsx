@@ -198,19 +198,17 @@ export function KassaApp(props: KassaProps) {
         <Button size="sm" variant="ghost" className="text-white hover:bg-slate-800" onClick={() => setDialog('cash')}>
           Kas
         </Button>
-        <Link href="/dagafsluiting" className="rounded-xl px-3 py-1.5 text-sm font-semibold hover:bg-slate-800">
-          Dag
+        <Link href="/dagafsluiting" className="rounded-xl px-3 py-1.5 text-sm font-semibold whitespace-nowrap hover:bg-slate-800">
+          Dag afsluiten
         </Link>
         {active.role !== 'MEDEWERKER' && (
           <Button size="sm" variant="ghost" className="text-white hover:bg-slate-800" onClick={() => setDialog('return')}>
             Retour
           </Button>
         )}
-        {active.role === 'ADMIN' && (
-          <Link href="/beheer" className="rounded-xl px-3 py-1.5 text-sm font-semibold hover:bg-slate-800">
-            Beheer
-          </Link>
-        )}
+        <Link href="/beheer" className="rounded-xl px-3 py-1.5 text-sm font-semibold hover:bg-slate-800">
+          Beheer
+        </Link>
         <Button size="sm" variant="ghost" className="text-white hover:bg-slate-800" title="Afmelden" onClick={() => guard(async () => { await logoutEmployeeAction(); setActiveUserId(null); })}>
           ⏻
         </Button>
@@ -560,11 +558,9 @@ function DayStartDialog({
   // Snelkoppelingen die altijd bereikbaar blijven, ook vóór de start of na het afsluiten
   const links = (
     <div className="flex flex-wrap gap-2">
-      {role === 'ADMIN' && (
-        <Link href="/beheer" className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
-          ⚙ Beheer
-        </Link>
-      )}
+      <Link href="/beheer" className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
+        ⚙ Beheer
+      </Link>
       <Link href="/rapporten" className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-slate-300">
         Z-rapporten
       </Link>

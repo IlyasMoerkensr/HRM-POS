@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
-import { isPairedDevice } from '@/lib/auth/session';
+import { getReportAccess } from '@/lib/auth/access';
 import { formatEUR } from '@/lib/money';
 import { prisma } from '@/lib/prisma';
 import { DENOMINATIONS } from '@/lib/reports/daySummary';
@@ -33,8 +33,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /** Z-rapport, geschikt om af te drukken of als PDF op te slaan voor de boekhouder. */
 export default async function ZReportPage({ params }: { params: Promise<{ id: string }> }) {
-  if (!(await isPairedDevice())) redirect('/koppelen');
   const { id } = await params;
+  const access = await getReportAccess();
+  if (!access) redirect(`/login?next=/rapporten/z/${id}`);
   const z = await prisma.zReport.findUnique({
     where: { id },
     include: {
@@ -57,9 +58,11 @@ export default async function ZReportPage({ params }: { params: Promise<{ id: st
     <div className="min-h-dvh bg-slate-100 print:bg-white">
       <div className="mx-auto flex max-w-3xl items-center justify-between gap-2 p-4 print:hidden">
         <div className="flex gap-2">
-          <Link href="/kassa" className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white">
-            ← Kassa
-          </Link>
+          {access.via === 'kassa' && (
+            <Link href="/kassa" className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white">
+              ← Kassa
+            </Link>
+          )}
           <Link href="/rapporten" className="rounded-xl bg-white px-4 py-2 font-semibold ring-1 ring-slate-300">
             Alle Z-rapporten
           </Link>
@@ -164,6 +167,14 @@ export default async function ZReportPage({ params }: { params: Promise<{ id: st
           <Section title="Kastelling">
             <table className="w-full text-xs">
               <tbody>
+                {'totaal' in count && (
+                  <tr>
+                    <td className="py-0.5" colSpan={2}>
+                      Alleen totaal geteld
+                    </td>
+                    <td className="text-right tabular">{formatEUR(count.totaal)}</td>
+                  </tr>
+                )}
                 {DENOMINATIONS.filter((d) => (count[String(d.cents)] ?? 0) > 0).map((d) => (
                   <tr key={d.cents}>
                     <td className="py-0.5">{d.label}</td>

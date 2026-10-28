@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import { isPairedDevice } from '@/lib/auth/session';
+import { PortalHeader } from '@/components/PortalHeader';
+import { getReportAccess } from '@/lib/auth/access';
 import { formatEUR } from '@/lib/money';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 export default async function RapportenPage() {
-  if (!(await isPairedDevice())) redirect('/koppelen');
+  const access = await getReportAccess();
+  if (!access) redirect('/login?next=/rapporten');
   const reports = await prisma.zReport.findMany({
     include: { businessDay: { select: { date: true, sequence: true } }, createdBy: { select: { name: true } } },
     orderBy: { createdAt: 'desc' },
@@ -17,15 +19,7 @@ export default async function RapportenPage() {
 
   return (
     <div className="min-h-dvh">
-      <header className="flex items-center gap-3 bg-slate-900 px-4 py-3 text-white">
-        <Link href="/kassa" className="rounded-lg bg-slate-800 px-3 py-2 font-semibold">
-          ← Kassa
-        </Link>
-        <h1 className="text-lg font-bold">Z-rapporten</h1>
-        <Link href="/export" className="ml-auto rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold">
-          Export voor de boekhouder
-        </Link>
-      </header>
+      <PortalHeader access={access} title="Z-rapporten" active="rapporten" />
       <main className="mx-auto max-w-5xl p-4">
         {reports.length === 0 ? (
           <p className="py-10 text-center text-slate-500">Nog geen Z-rapporten.</p>

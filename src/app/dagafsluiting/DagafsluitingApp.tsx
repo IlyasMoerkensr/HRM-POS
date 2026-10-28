@@ -8,10 +8,10 @@ import { closeDayAction, daySummaryAction, reconcileAction } from '@/app/actions
 import { discardDraftAction, voidOrderAction } from '@/app/actions/pos';
 import { CancelPinButton } from '@/components/CancelPinButton';
 import { vatLabel } from '@/components/CartView';
-import { Button, cx, ErrorBox, Modal, Money } from '@/components/ui';
+import { Button, cx, digitsToCents, ErrorBox, Modal, Money, NumPad } from '@/components/ui';
 import { formatEUR } from '@/lib/money';
 import type { ReconciliationResult } from '@/lib/mollie/mollieService';
-import { DENOMINATIONS, type DaySummary } from '@/lib/reports/daySummary';
+import { DENOMINATIONS, TOTAL_KEY, type DaySummary } from '@/lib/reports/daySummary';
 
 type Step = 'overzicht' | 'tellen' | 'controle';
 
@@ -25,12 +25,14 @@ const MOVEMENT_LABEL: Record<string, string> = {
 export function DagafsluitingApp({
   initial,
   canClose,
+  canExport,
   mollieConfigured,
   isToday,
   sequence,
 }: {
   initial: DaySummary;
   canClose: boolean;
+  canExport: boolean;
   mollieConfigured: boolean;
   isToday: boolean;
   sequence: number;
@@ -46,7 +48,14 @@ export function DagafsluitingApp({
   const [confirmClose, setConfirmClose] = useState(false);
   const [voiding, setVoiding] = useState<{ id: string; number: string | null } | null>(null);
 
-  const counted = useMemo(() => DENOMINATIONS.reduce((s, d) => s + (count[String(d.cents)] ?? 0) * d.cents, 0), [count]);
+  // Tellen per munt/biljet (nauwkeurig) of alleen het totaal (snel)
+  const [countMode, setCountMode] = useState<'coupures' | 'totaal'>('totaal');
+  const [totalDigits, setTotalDigits] = useState('');
+  const counted = useMemo(
+    () => (countMode === 'totaal' ? digitsToCents(totalDigits) : DENOMINATIONS.reduce((s, d) => s + (count[String(d.cents)] ?? 0) * d.cents, 0)),
+    [count, countMode, totalDigits],
+  );
+  const countPayload = countMode === 'totaal' ? { [TOTAL_KEY]: counted } : count;
   const difference = counted - summary.cash.expectedCents;
   const blockers = summary.blockers.openOrders.length + summary.blockers.parkedOrders.length + summary.blockers.pendingPayments.length;
 
@@ -88,7 +97,7 @@ export function DagafsluitingApp({
         <Link href="/rapporten" className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">
           Eerdere Z-rapporten
         </Link>
-        {canClose && (
+        {canExport && (
           <Link href="/export" className="rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">
             Export
           </Link>
@@ -162,18 +171,29 @@ export function DagafsluitingApp({
                 <Button variant="primary" size="lg" disabled={blockers > 0} onClick={() => setStep('tellen')}>
                   Kas tellen →
                 </Button>
-              ) : (
-                <p className="self-center text-sm text-slate-500">Afsluiten kan alleen door een manager of beheerder.</p>
-              )}
+              ) : null}
             </div>
           </>
         )}
 
         {step === 'tellen' && (
           <section className="space-y-4">
-            <p className="text-slate-600">
-              Tel het geld in de lade per munt en biljet. Het verwachte bedrag zie je pas na het tellen, zodat de telling eerlijk blijft.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-slate-600">Tel het geld in de lade. Het verwachte bedrag zie je pas na het tellen, zodat de telling eerlijk blijft.</p>
+              <div className="flex rounded-xl bg-slate-200 p-1">
+                {(['totaal', 'coupures'] as const).map((m) => (
+                  <button key={m} type="button" onClick={() => setCountMode(m)} className={cx('rounded-lg px-4 py-2 font-semibold', countMode === m ? 'bg-white shadow' : 'text-slate-600')}>
+                    {m === 'totaal' ? 'Alleen totaal' : 'Per munt en biljet'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {countMode === 'totaal' ? (
+              <div className="mx-auto max-w-sm space-y-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                <p className="text-sm text-slate-600">Tel al het geld in de lade en vul het totaalbedrag in.</p>
+                <NumPad value={totalDigits} onChange={setTotalDigits} />
+              </div>
+            ) : (
             <div className="grid gap-4 md:grid-cols-2">
               {(['biljet', 'munt'] as const).map((kind) => (
                 <div key={kind} className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
@@ -208,6 +228,7 @@ export function DagafsluitingApp({
                 </div>
               ))}
             </div>
+            )}
             <div className="flex items-center justify-between rounded-2xl bg-slate-900 px-5 py-4 text-white">
               <span className="text-lg">Geteld</span>
               <Money cents={counted} className="text-4xl font-extrabold" />
@@ -298,7 +319,7 @@ export function DagafsluitingApp({
                 Nee, terug
               </Button>
               <Button variant="danger" size="lg" disabled={busy} onClick={() => guard(async () => {
-                const r = await closeDayAction({ businessDayId: summary.businessDayId, count, note: note || null });
+                const r = await closeDayAction({ businessDayId: summary.businessDayId, count: countPayload, note: note || null });
                 if (!r.ok) {
                   setConfirmClose(false);
                   return setError(r.error);

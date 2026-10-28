@@ -37,7 +37,6 @@ export async function reconcileAction(businessDayId: string) {
 export async function closeDayAction(input: { businessDayId: string; count: CashCount; note: string | null }) {
   return run(async () => {
     const actor = await requireKassaActor();
-    if (actor.role === 'MEDEWERKER') throw new AuthError('Alleen een manager of beheerder kan de dag afsluiten');
 
     // Laatste Mollie-controle meenemen in het Z-rapport (lukt dat niet, dan zonder)
     let reconciliation: ReconciliationResult | null = null;

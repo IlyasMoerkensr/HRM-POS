@@ -20,17 +20,19 @@ import {
   type ProductInput,
   type UserInput,
 } from '@/app/actions/admin';
+import { AccountsTab } from '@/app/beheer/AccountsTab';
 import { resizeImage } from '@/components/imageResize';
+import { LogoutButton } from '@/components/LogoutButton';
 import { Button, cx, ErrorBox, Modal, Money } from '@/components/ui';
 import { formatKickCode, getCashDrawer, parseKickCode } from '@/lib/hardware/cashDrawer';
 import { formatEuroInput, parseEuroInput } from '@/lib/money';
 
 type Data = Extract<Awaited<ReturnType<typeof adminDataAction>>, { ok: true }>['data'];
-type Tab = 'medewerkers' | 'producten' | 'categorieen' | 'kassalade' | 'grootboek' | 'algemeen';
+type Tab = 'medewerkers' | 'producten' | 'categorieen' | 'kassalade' | 'grootboek' | 'algemeen' | 'accounts';
 
 const ROLES = { MEDEWERKER: 'Medewerker', MANAGER: 'Manager (retouren)', ADMIN: 'Beheerder' } as const;
 
-export function BeheerApp() {
+export function BeheerApp({ me, local }: { me: { id: string; name: string; role: 'OWNER' | 'ADMIN' | 'ACCOUNTANT' }; local: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [tab, setTab] = useState<Tab>('medewerkers');
   const [error, setError] = useState<string | null>(null);
@@ -58,18 +60,28 @@ export function BeheerApp() {
     ['kassalade', 'Kassalade'],
     ['grootboek', 'Grootboek'],
     ['algemeen', 'Algemeen'],
+    ['accounts', 'Accounts'],
   ];
 
   return (
     <div className="min-h-dvh">
-      <header className="flex items-center gap-4 bg-slate-900 px-4 py-3 text-white">
-        <Link href="/kassa" className="rounded-lg bg-slate-800 px-3 py-2 font-semibold">
-          ← Kassa
-        </Link>
+      <header className="flex flex-wrap items-center gap-3 bg-slate-900 px-4 py-3 text-white">
+        {local && (
+          <Link href="/kassa" className="rounded-lg bg-slate-800 px-3 py-2 font-semibold">
+            ← Kassa
+          </Link>
+        )}
         <h1 className="text-lg font-bold">Beheer</h1>
-        <Link href="/export" className="order-last ml-auto rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">
-          Export
-        </Link>
+        <div className="order-last ml-auto flex items-center gap-2 text-sm">
+          <Link href="/rapporten" className="rounded-lg px-3 py-2 font-semibold hover:bg-slate-800">
+            Z-rapporten
+          </Link>
+          <Link href="/export" className="rounded-lg px-3 py-2 font-semibold hover:bg-slate-800">
+            Export
+          </Link>
+          <span className="text-slate-300">{me.name}</span>
+          <LogoutButton />
+        </div>
         <nav className="flex gap-1 overflow-x-auto">
           {tabs.map(([t, label]) => (
             <button key={t} type="button" onClick={() => setTab(t)} className={cx('rounded-lg px-3 py-2 font-semibold whitespace-nowrap', tab === t ? 'bg-white text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>
@@ -89,6 +101,8 @@ export function BeheerApp() {
           <ProductsTab data={data} onError={setError} onDone={done} />
         ) : tab === 'categorieen' ? (
           <CategoriesTab data={data} onError={setError} onDone={done} />
+        ) : tab === 'accounts' ? (
+          <AccountsTab meId={me.id} meRole={me.role} onError={setError} onDone={done} />
         ) : tab === 'kassalade' ? (
           <DrawerTab data={data} onError={setError} onDone={done} />
         ) : tab === 'grootboek' ? (

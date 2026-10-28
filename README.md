@@ -26,26 +26,35 @@ Kassasysteem dat lokaal op de kassa-pc draait (net als het rooster), met:
    git clone https://github.com/IlyasMoerkensr/hrm-pos.git
    ```
    Windows vraagt één keer om in te loggen bij GitHub.
-4. Open de map `hrm-pos` en **dubbelklik `start.bat`**.
-   - De eerste keer duurt dit een paar minuten (installeren en klaarzetten).
+4. Open de map `hrm-pos` en **dubbelklik `HRM-Kassa.exe`**.
+   - Windows kan waarschuwen (“Windows heeft uw pc beschermd”), omdat het programma nieuw is. Klik op **Meer info** → **Toch uitvoeren**.
+   - De eerste keer duurt het een paar minuten (installeren en klaarzetten). Het blauwe kassa-icoon naast de klok laat zien wat er gebeurt.
    - Windows vraagt om firewalltoegang voor Node.js: kies **Privénetwerken toestaan** (nodig voor de telefoons).
-5. Er opent een zwart venster met de adressen en de **koppelcode**, en Chrome opent het kassascherm.
-   Laat het zwarte venster open staan: sluiten = kassa stopt.
+5. Het kassascherm opent vanzelf in de browser. De kassa draait daarna **onzichtbaar op de achtergrond**; er is geen zwart venster meer.
 
-```
-  Kassa (deze pc):  http://localhost:3000/kassa
-  Telefoons:        http://192.168.1.25:3000/telefoon
-  Koppelcode:       492863
-```
+**Het kassa-icoon naast de klok** (klik met rechts):
+
+| Menu | Wat |
+|---|---|
+| Kassa openen / Beheer openen | opent het scherm in de browser (linksklik op het icoon opent ook de kassa) |
+| Adressen en koppelcode… | adres voor de telefoons en de koppelcode |
+| Automatisch starten met Windows | vinkje aan = de kassa start vanzelf als de pc opstart |
+| Bijwerken naar nieuwste versie | maakt een backup, haalt de nieuwste versie op en start opnieuw |
+| Logboek openen | bij problemen: dit bestand doorsturen |
+| Kassa afsluiten | stopt de kassa (ook voor de telefoons) |
+
+Zie je het icoon niet? Klik op het pijltje **^** naast de klok en sleep het icoon naar de taakbalk.
+`start.bat` werkt nog steeds als alternatief (met zwart venster).
 
 > **Tip:** geef de pc in je router een vast IP-adres (DHCP-reservering), anders verandert het adres voor de telefoons soms.
 
 ## Eerste keer instellen
 
-1. **Kassa koppelen:** vul op de pc de koppelcode in. Dit hoeft maar één keer.
-2. Kies **Medewerker 1** (dat is de beheerder), vul het **beginsaldo** van de lade in.
-3. Klik rechtsboven op **Beheer**:
+1. **Kassa koppelen:** vul op de pc de koppelcode in (kassa-icoon → *Adressen en koppelcode*). Dit hoeft maar één keer.
+2. Kies een medewerker en vul het **beginsaldo** van de lade in.
+3. Klik rechtsboven op **Beheer**. De eerste keer maak je daar het **eigenaarsaccount** aan (naam, e-mail, wachtwoord en de koppelcode). Daarna log je in Beheer altijd in met e-mail en wachtwoord:
    - **Medewerkers:** namen invullen, pincodes instellen, rol kiezen (Manager mag retouren doen).
+   - **Accounts:** e-mail-accounts voor beheerders en de **boekhouder** (die ziet alleen Z-rapporten en export).
    - **Producten / Categorieën:** eigen assortiment invoeren, met foto (knop **Foto kiezen** bij een product). Laat de btw-tarieven controleren door de boekhouder.
      De producten uit `prisma/producten.csv` worden bij de eerste start automatisch ingelezen. Een nieuwe lijst (bijv. uit een ander kassasysteem) lees je in met **Importeren (CSV)**.
    - **Kassalade:** klik op **Test**, kies de COM-poort van de lade. Gaat hij open? Dan **Opslaan**.
@@ -87,7 +96,7 @@ Zonder Mollie-sleutel werkt pinnen ook: de medewerker tikt het bedrag in de Moll
 1. Room eerst het geld af dat naar de kluis gaat (**Kas** → Afromen), zodat alleen het wisselgeld voor morgen in de lade blijft.
 2. Klik bovenin op **Dag**. Je ziet de tussenstand: omzet, btw, contant, pin en per medewerker.
 3. Staan er nog open of geparkeerde bonnen? Reken die af of verwijder ze.
-4. **Kas tellen**: vul per munt en biljet het aantal in. Het verwachte bedrag zie je pas daarna (eerlijke telling).
+4. **Kas tellen**: tel het geld in de lade en vul het totaal in (of per munt en biljet). Het verwachte bedrag zie je pas daarna (eerlijke telling).
 5. **Controle**: kasverschil (bij een verschil is een toelichting verplicht) en de pincontrole per medewerker. Met een Mollie-sleutel vergelijkt de kassa dit automatisch met Mollie; anders vergelijk je met de Mollie Tap-app op elke telefoon.
 6. **Dag afsluiten** → het Z-rapport verschijnt. Druk het af of sla het op als PDF voor de boekhouder.
 
@@ -95,7 +104,7 @@ Zonder Mollie-sleutel werkt pinnen ook: de medewerker tikt het bedrag in de Moll
 
 **Per ongeluk afgesloten?** Het Z-rapport blijft altijd staan (dat hoort zo voor de boekhouding). Een manager of beheerder klikt in het venster “Kassadag afgesloten” op **Nieuwe kassaperiode starten**. Alles wat je daarna verkoopt komt op een tweede Z-rapport voor dezelfde datum (“periode 2”), dat je aan het eind van de dag gewoon afsluit. In de export staan beide als aparte regels.
 
-Alleen een **manager** of **beheerder** kan de dag afsluiten. Daarna kan er die dag niets meer worden aangeslagen en is het Z-rapport onwijzigbaar. Alle Z-rapporten staan onder **Dag → Eerdere Z-rapporten**.
+Iedere medewerker kan de dag afsluiten. Standaard tel je alleen het **totaal** in de lade; wie nauwkeuriger wil, kiest *Per munt en biljet*. Daarna kan er die dag niets meer worden aangeslagen en is het Z-rapport onwijzigbaar. Alle Z-rapporten staan onder **Dag → Eerdere Z-rapporten**.
 
 ## Export voor de boekhouder
 
@@ -117,6 +126,26 @@ MOLLIE_ORG_ACCESS_TOKEN="access_..."
 ```
 Zo maak je hem: Mollie Dashboard → **Developers** → **API keys** → *advanced access token* aanmaken (of direct via https://my.mollie.com/dashboard/developers/api-access-tokens). Vink het leesrecht voor **settlements** aan (en eventueel balances). Alleen een gebruiker met de rol **Admin** in Mollie kan dit. Het token begint met `access_`. Start de kassa daarna opnieuw en klik op de exportpagina op **Uitbetalingen ophalen bij Mollie**.
 
+## Inloggen voor beheer en boekhouder (ook op afstand)
+
+- **Beheer** opent met e-mail en wachtwoord (eigenaar of beheerder). De kassa zelf blijft werken met medewerkers en pincodes.
+- **Accounts** beheer je in Beheer → Accounts. Rollen: *Eigenaar* (alles), *Beheerder* (alles behalve eigenaars beheren), *Boekhouder* (alleen Z-rapporten en export).
+- **Wachtwoord vergeten?** Op de kassa-pc kan dat via *Wachtwoord vergeten?* met de koppelcode. De boekhouder vraagt het aan de eigenaar (Beheer → Accounts → Nieuw wachtwoord).
+- Na 8 foute pogingen wordt een account 15 minuten geblokkeerd.
+
+### Boekhouder op afstand laten meekijken
+
+De kassa draait op de pc in de zaak. Om de boekhouder er vanaf internet bij te laten, maak je een beveiligde verbinding met **Tailscale Funnel** (gratis):
+
+1. Installeer **Tailscale** op de kassa-pc ([tailscale.com/download](https://tailscale.com/download)) en log in.
+2. Open **PowerShell** en typ: `tailscale funnel --bg 3000`
+   De eerste keer vraagt Tailscale om Funnel aan te zetten; volg de link en klik op toestaan.
+3. Tailscale toont een adres zoals `https://kassa-pc.tail1234.ts.net`. Dit adres blijft altijd hetzelfde.
+4. Zet dat adres in `.env`: `PUBLIC_BASE_URL="https://kassa-pc.tail1234.ts.net"` (dan werken ook de Mollie-meldingen direct) en kies in het kassa-icoon *Kassa afsluiten* en start `HRM-Kassa.exe` opnieuw.
+5. Maak in Beheer → Accounts een account voor de boekhouder en geef hem het adres, het e-mailadres en het wachtwoord.
+
+Via dit adres zijn **alleen** inloggen, Beheer, Z-rapporten en export bereikbaar. De kassa, de telefoonweergave en het koppelen werken alleen op het netwerk van de zaak. De kassa-pc moet aan staan als de boekhouder kijkt.
+
 ## Backups
 
 - Automatisch bij elke start en elke 4 uur in de map `backups` (laatste 90 worden bewaard).
@@ -128,7 +157,8 @@ Zo maak je hem: Mollie Dashboard → **Developers** → **API keys** → *advanc
 
 ## Bijwerken naar een nieuwe versie
 
-Sluit het zwarte kassavenster en dubbelklik **`update.bat`**. Die maakt eerst een backup, haalt de nieuwe versie op en zet hem klaar. Daarna weer `start.bat`.
+Klik met rechts op het kassa-icoon naast de klok → **Bijwerken naar nieuwste versie**. De kassa maakt eerst een backup, haalt de nieuwe versie op en start opnieuw (1 à 3 minuten).
+Gebruik je `start.bat`: sluit het zwarte venster, dubbelklik `update.bat` en daarna weer `start.bat`.
 
 ---
 
@@ -145,7 +175,10 @@ Sluit het zwarte kassavenster en dubbelklik **`update.bat`**. Die maakt eerst ee
 | `src/lib/hardware/cashDrawer.ts` | USB-kassalade via Web Serial (Chrome/Edge) |
 | `src/lib/auth/session.ts` | Koppelen van de kassa-pc, medewerker-wissel, inloggen op telefoon |
 | `src/app/kassa`, `telefoon`, `beheer`, `dagafsluiting`, `rapporten`, `export` | De schermen |
-| `scripts/`, `start.bat`, `update.bat` | Starten en bijwerken op Windows |
+| `HRM-Kassa.exe`, `launcher/` | Achtergrondprogramma voor Windows (Go); opnieuw bouwen met `launcher/build.sh` |
+| `src/lib/auth/` | Koppelen kassa-pc, pincodes, e-mail-accounts, herkenning van verzoeken op afstand |
+| `src/proxy.ts` | Blokkeert kassa en telefoon voor verzoeken van buiten |
+| `scripts/`, `start.bat`, `update.bat` | Starten en bijwerken zonder de .exe |
 
 Ontwikkelen: `npm install`, `node scripts/setup.mjs`, `npx prisma migrate deploy`, `npx prisma db seed`, `npm run dev`.
 Controle: `npm run typecheck`, `npm run build`.

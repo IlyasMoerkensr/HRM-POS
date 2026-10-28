@@ -1,11 +1,10 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import { getActiveEmployeeId, isPairedDevice } from '@/lib/auth/session';
+import { PortalHeader } from '@/components/PortalHeader';
+import { getReportAccess } from '@/lib/auth/access';
 import { clearingSummary, dayRows, loadPeriod, monthPeriod, parsePeriod, VAT_LABEL, VAT_RUBRIEK, vatTotals, type Period } from '@/lib/export/accounting';
 import { EXPORT_KINDS } from '@/lib/export/build';
 import { formatEUR } from '@/lib/money';
-import { prisma } from '@/lib/prisma';
 import { getSetting } from '@/lib/settings';
 import { shopDateString } from '@/lib/time';
 
@@ -17,18 +16,8 @@ const money = (cents: number | null) => (cents === null ? '—' : formatEUR(cent
 const nlDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export default async function ExportPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  if (!(await isPairedDevice())) redirect('/koppelen');
-  const activeId = await getActiveEmployeeId();
-  const user = activeId ? await prisma.user.findUnique({ where: { id: activeId } }) : null;
-  if (!user) redirect('/kassa');
-  if (user.role === 'MEDEWERKER') {
-    return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
-        <p className="text-lg">Exporteren kan alleen door een manager of beheerder.</p>
-        <Link href="/kassa" className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white">Terug naar de kassa</Link>
-      </main>
-    );
-  }
+  const access = await getReportAccess({ needManager: true });
+  if (!access) redirect('/login?next=/export');
 
   const sp = await searchParams;
   const month = sp.maand ?? shopDateString().slice(0, 7);
@@ -51,11 +40,7 @@ export default async function ExportPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="min-h-dvh bg-slate-100 print:bg-white">
-      <header className="flex flex-wrap items-center gap-3 bg-slate-900 px-4 py-3 text-white print:hidden">
-        <Link href="/kassa" className="rounded-lg bg-slate-800 px-3 py-2 font-semibold">← Kassa</Link>
-        <h1 className="text-lg font-bold">Export voor de boekhouder</h1>
-        <Link href="/rapporten" className="ml-auto rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-800">Z-rapporten</Link>
-      </header>
+      <PortalHeader access={access} title="Export voor de boekhouder" active="export" />
 
       <main className="mx-auto max-w-6xl space-y-4 p-4 print:max-w-none print:p-0 print:text-[11px]">
         {/* Periode kiezen */}

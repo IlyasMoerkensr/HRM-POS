@@ -42,7 +42,8 @@ export default async function DagafsluitingPage() {
   return (
     <DagafsluitingApp
       initial={summary}
-      canClose={user.role !== 'MEDEWERKER'}
+      canClose
+      canExport={user.role !== 'MEDEWERKER'}
       mollieConfigured={isMollieConfigured()}
       isToday={day.date === shopDateString()}
       sequence={day.sequence}

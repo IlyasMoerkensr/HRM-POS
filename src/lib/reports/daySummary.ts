@@ -27,8 +27,17 @@ export const DENOMINATIONS = [
 
 export type CashCount = Record<string, number>;
 
+/** Sleutel voor "alleen het totaal geteld" (sneller, zonder munten en biljetten apart) */
+export const TOTAL_KEY = 'totaal';
+
 /** Telling → totaal in centen. Gooit een fout bij ongeldige aantallen. */
 export function countTotal(count: CashCount): number {
+  if (TOTAL_KEY in count) {
+    const t = count[TOTAL_KEY];
+    if (!Number.isSafeInteger(t) || t < 0 || t > 100_000_00) throw new Error('Ongeldig geteld totaal');
+    if (Object.keys(count).length !== 1) throw new Error('Kies óf het totaal, óf de telling per munt en biljet');
+    return t;
+  }
   let total = 0;
   for (const d of DENOMINATIONS) {
     const n = count[String(d.cents)] ?? 0;

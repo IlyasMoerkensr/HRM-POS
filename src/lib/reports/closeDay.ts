@@ -29,7 +29,7 @@ export async function closeBusinessDay(input: CloseDayInput) {
 
   const result = await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId } });
-    if (user.role === 'MEDEWERKER') throw new PosError('Alleen een manager of beheerder kan de dag afsluiten');
+    if (!user.active) throw new PosError('Deze medewerker is niet actief');
     const day = await tx.businessDay.findUniqueOrThrow({ where: { id: input.businessDayId } });
     if (day.status !== 'OPEN') throw new PosError('Deze dag is al afgesloten');
 

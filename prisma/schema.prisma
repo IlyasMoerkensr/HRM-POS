@@ -154,6 +154,33 @@ model User {
 }
 
 // -----------------------------------------------------------------------------
+//  Accounts voor beheer en boekhouder (e-mail + wachtwoord, ook op afstand)
+// -----------------------------------------------------------------------------
+
+enum AccountRole {
+  OWNER // eigenaar: alles, ook accounts beheren
+  ADMIN // beheer (producten, medewerkers, instellingen), geen eigenaars beheren
+  ACCOUNTANT // boekhouder: alleen Z-rapporten en export bekijken
+}
+
+model Account {
+  id             String      @id @default(cuid())
+  email          String      @unique
+  name           String
+  /// scrypt-hash van het wachtwoord
+  passwordHash   String
+  role           AccountRole
+  active         Boolean     @default(true)
+  /// Ophogen maakt alle bestaande inlogsessies ongeldig (bij wachtwoordwijziging)
+  sessionVersion Int         @default(1)
+  failedLogins   Int         @default(0)
+  lockedUntil    DateTime?
+  lastLoginAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+// -----------------------------------------------------------------------------
 //  Grootboek, btw en instellingen
 // -----------------------------------------------------------------------------
 
@@ -652,17 +679,20 @@ model MollieSettlementLine {
 // -----------------------------------------------------------------------------
 
 model AuditLog {
-  id       String   @id @default(cuid())
-  at       DateTime @default(now())
-  userId   String?
+  id        String   @id @default(cuid())
+  at        DateTime @default(now())
+  userId    String?
+  /// Beheer-account dat de actie deed (e-mail-login); bewust zonder relatie,
+  /// zodat de beschermde AuditLog-tabel niet opnieuw opgebouwd hoeft te worden
+  accountId String?
   /// bijv. ORDER_NUMBERED, ORDER_PAID, ORDER_VOIDED, DRAWER_OPENED, NO_SALE,
   /// MOLLIE_PAYMENT_CREATED, MOLLIE_STATUS, MOLLIE_MANUAL_CONFIRM, PRICE_CHANGED,
   /// SETTING_CHANGED, DAY_OPENED, DAY_CLOSED, RECONCILIATION
-  action   String
-  entity   String?
-  entityId String?
+  action    String
+  entity    String?
+  entityId  String?
   /// JSON met details
-  data     String?
+  data      String?
 
   user User? @relation(fields: [userId], references: [id])
 

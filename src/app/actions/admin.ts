@@ -4,7 +4,8 @@
 import { audit } from '@/lib/audit';
 import { run } from '@/lib/actionResult';
 import { hashPin } from '@/lib/auth/pin';
-import { AuthError, requireAdmin } from '@/lib/auth/session';
+import { requireAccount } from '@/lib/auth/accounts';
+import { AuthError } from '@/lib/auth/session';
 import { isMollieConfigured, linkPhoneToUser, listPhoneTerminals, mollieErrorMessage } from '@/lib/mollie/mollieService';
 import { PosError } from '@/lib/orders/orderService';
 import { applyImport, parseProductCsv, previewImport } from '@/lib/import/products';
@@ -12,6 +13,9 @@ import { prisma } from '@/lib/prisma';
 import { EDITABLE_SETTINGS, getSettings } from '@/lib/settings';
 
 const COLOR = /^#[0-9a-f]{6}$/i;
+
+/** Beheer: ingelogd met e-mail en wachtwoord als eigenaar of beheerder. */
+const requireAdmin = () => requireAccount(['OWNER', 'ADMIN']);
 
 export async function adminDataAction() {
   return run(async () => {
@@ -61,14 +65,11 @@ export async function saveUserAction(input: UserInput) {
     if (name.length < 1 || name.length > 40) throw new PosError('Vul een naam in (max. 40 tekens)');
     if (!COLOR.test(input.color)) throw new PosError('Ongeldige kleur');
     if (!['MEDEWERKER', 'MANAGER', 'ADMIN'].includes(input.role)) throw new PosError('Ongeldige rol');
-    if (input.id === admin.id && (input.role !== 'ADMIN' || !input.active)) {
-      throw new PosError('Je kunt jezelf niet als beheerder uitschakelen');
-    }
     const data = { name, role: input.role, color: input.color, active: input.active, sortOrder: Math.trunc(input.sortOrder) || 0 };
     const user = input.id
       ? await prisma.user.update({ where: { id: input.id }, data })
       : await prisma.user.create({ data });
-    await audit(prisma, { action: input.id ? 'USER_UPDATED' : 'USER_CREATED', userId: admin.id, entity: 'User', entityId: user.id, data });
+    await audit(prisma, { action: input.id ? 'USER_UPDATED' : 'USER_CREATED', accountId: admin.id, entity: 'User', entityId: user.id, data });
     return { id: user.id };
   });
 }
@@ -79,7 +80,7 @@ export async function setUserPinAction(userId: string, pin: string | null) {
     const admin = await requireAdmin();
     if (pin !== null && !/^\d{4}$/.test(pin)) throw new PosError('Pincode moet uit 4 cijfers bestaan');
     await prisma.user.update({ where: { id: userId }, data: { pinHash: pin ? hashPin(pin) : null } });
-    await audit(prisma, { action: pin ? 'PIN_SET' : 'PIN_CLEARED', userId: admin.id, entity: 'User', entityId: userId });
+    await audit(prisma, { action: pin ? 'PIN_SET' : 'PIN_CLEARED', accountId: admin.id, entity: 'User', entityId: userId });
     return true as const;
   });
 }
@@ -162,13 +163,13 @@ export async function saveProductAction(input: ProductInput) {
     if (before && (before.priceInclCents !== data.priceInclCents || before.vatRateId !== data.vatRateId)) {
       await audit(prisma, {
         action: 'PRICE_CHANGED',
-        userId: admin.id,
+        accountId: admin.id,
         entity: 'Product',
         entityId: product.id,
         data: { name, from: { price: before.priceInclCents, vatRateId: before.vatRateId }, to: { price: data.priceInclCents, vatRateId: data.vatRateId } },
       });
     }
-    await audit(prisma, { action: input.id ? 'PRODUCT_UPDATED' : 'PRODUCT_CREATED', userId: admin.id, entity: 'Product', entityId: product.id, data });
+    await audit(prisma, { action: input.id ? 'PRODUCT_UPDATED' : 'PRODUCT_CREATED', accountId: admin.id, entity: 'Product', entityId: product.id, data });
     return { id: product.id };
   });
 }
@@ -181,7 +182,7 @@ export async function saveCategoryAction(input: { id?: string; name: string; col
     if (!COLOR.test(input.color)) throw new PosError('Ongeldige kleur');
     const data = { name, color: input.color, sortOrder: Math.trunc(input.sortOrder) || 0, active: input.active };
     const cat = input.id ? await prisma.category.update({ where: { id: input.id }, data }) : await prisma.category.create({ data });
-    await audit(prisma, { action: 'CATEGORY_SAVED', userId: admin.id, entity: 'Category', entityId: cat.id, data });
+    await audit(prisma, { action: 'CATEGORY_SAVED', accountId: admin.id, entity: 'Category', entityId: cat.id, data });
     return { id: cat.id };
   });
 }
@@ -201,7 +202,7 @@ export async function saveSettingsAction(values: Record<string, string>) {
     for (const [key, value] of Object.entries(values)) {
       if (before[key] === value) continue;
       await prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
-      await audit(prisma, { action: 'SETTING_CHANGED', userId: admin.id, entity: 'Setting', entityId: key, data: { from: before[key] ?? null, to: value } });
+      await audit(prisma, { action: 'SETTING_CHANGED', accountId: admin.id, entity: 'Setting', entityId: key, data: { from: before[key] ?? null, to: value } });
     }
     return true as const;
   });
@@ -227,7 +228,7 @@ export async function saveLedgerAccountAction(input: { oldCode: string; code: st
       throw new PosError(`Rekeningnummer ${code} bestaat al`);
     }
     await prisma.ledgerAccount.update({ where: { code: input.oldCode }, data: { code, name } });
-    await audit(prisma, { action: 'LEDGER_CHANGED', userId: admin.id, entity: 'LedgerAccount', entityId: code, data: { from: { code: existing.code, name: existing.name }, to: { code, name } } });
+    await audit(prisma, { action: 'LEDGER_CHANGED', accountId: admin.id, entity: 'LedgerAccount', entityId: code, data: { from: { code: existing.code, name: existing.name }, to: { code, name } } });
     return true as const;
   });
 }
@@ -258,7 +259,7 @@ export async function saveProductImageAction(productId: string, form: FormData) 
       data: { imageData: Buffer.from(bytes), imageMime: mime, imageVersion: { increment: 1 } },
       select: { id: true, imageVersion: true, name: true },
     });
-    await audit(prisma, { action: 'PRODUCT_IMAGE_SET', userId: admin.id, entity: 'Product', entityId: p.id, data: { name: p.name, bytes: bytes.length } });
+    await audit(prisma, { action: 'PRODUCT_IMAGE_SET', accountId: admin.id, entity: 'Product', entityId: p.id, data: { name: p.name, bytes: bytes.length } });
     return { imageUrl: `/api/products/${p.id}/image?v=${p.imageVersion}` };
   });
 }
@@ -267,7 +268,7 @@ export async function removeProductImageAction(productId: string) {
   return run(async () => {
     const admin = await requireAdmin();
     await prisma.product.update({ where: { id: productId }, data: { imageData: null, imageMime: null, imageVersion: { increment: 1 } }, select: { id: true } });
-    await audit(prisma, { action: 'PRODUCT_IMAGE_REMOVED', userId: admin.id, entity: 'Product', entityId: productId });
+    await audit(prisma, { action: 'PRODUCT_IMAGE_REMOVED', accountId: admin.id, entity: 'Product', entityId: productId });
     return true as const;
   });
 }

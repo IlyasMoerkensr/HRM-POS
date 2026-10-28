@@ -233,7 +233,8 @@ function findMatch<T extends { name: string; sku: string | null }>(products: T[]
   return (r.barcode ? products.find((p) => p.sku === r.barcode) : undefined) ?? products.find((p) => p.name.toLowerCase() === r.name.toLowerCase());
 }
 
-export async function applyImport(parsed: ParsedImport, options: ApplyOptions, userId: string | null) {
+/** `accountId`: beheer-account dat importeert (null = automatisch bij opstarten) */
+export async function applyImport(parsed: ParsedImport, options: ApplyOptions, accountId: string | null) {
   return prisma.$transaction(async (tx) => {
     const vatRates = await tx.vatRate.findMany();
     const vatId = new Map(vatRates.map((v) => [v.code, v.id]));
@@ -251,7 +252,7 @@ export async function applyImport(parsed: ParsedImport, options: ApplyOptions, u
         } else {
           await tx.ledgerAccount.update({ where: { code: rate.revenueAccountCode }, data: { code: l.code, name: l.title } });
         }
-        await audit(tx, { action: 'LEDGER_CHANGED', userId, entity: 'LedgerAccount', entityId: l.code, data: { from: rate.revenueAccountCode, to: l.code, source: 'import' } });
+        await audit(tx, { action: 'LEDGER_CHANGED', accountId, entity: 'LedgerAccount', entityId: l.code, data: { from: rate.revenueAccountCode, to: l.code, source: 'import' } });
         ledgerApplied.push(`${l.title}: ${rate.revenueAccountCode} → ${l.code}`);
       }
     }
@@ -286,7 +287,7 @@ export async function applyImport(parsed: ParsedImport, options: ApplyOptions, u
         if (match.priceInclCents !== data.priceInclCents || match.vatRateId !== data.vatRateId) {
           await audit(tx, {
             action: 'PRICE_CHANGED',
-            userId,
+            accountId,
             entity: 'Product',
             entityId: match.id,
             data: { name: r.name, from: { price: match.priceInclCents, vatRateId: match.vatRateId }, to: { price: data.priceInclCents, vatRateId: data.vatRateId }, source: 'import' },
@@ -309,7 +310,7 @@ export async function applyImport(parsed: ParsedImport, options: ApplyOptions, u
       await tx.product.updateMany({ where: { id: { in: ['seed-p-div-hoog', 'seed-p-div-laag'] }, sortOrder: { lt: 900 } }, data: { sortOrder: 900 } });
     }
 
-    await audit(tx, { action: 'PRODUCTS_IMPORTED', userId, data: { created, updated, skipped: parsed.skipped.length, ledger: ledgerApplied } });
+    await audit(tx, { action: 'PRODUCTS_IMPORTED', accountId, data: { created, updated, skipped: parsed.skipped.length, ledger: ledgerApplied } });
     return { created, updated, skipped: parsed.skipped.length, ledgerApplied };
   });
 }
