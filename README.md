@@ -111,11 +111,11 @@ Alleen **afgesloten dagen** (met Z-rapport) komen in de export, zodat cijfers no
 
 De rekeningnummers pas je aan in **Beheer → Grootboek**, zodat ze aansluiten op het schema van de boekhouder.
 
-**Mollie-uitbetalingen en kosten** ophalen: zet een organisatie-token in `.env`:
+**Mollie-uitbetalingen en kosten** ophalen: maak een *advanced access token* en zet die in `.env`:
 ```
 MOLLIE_ORG_ACCESS_TOKEN="access_..."
 ```
-(Mollie Dashboard → Developers → Organisatie-tokens, recht *settlements.read*.) Klik daarna op de exportpagina op **Uitbetalingen ophalen bij Mollie**.
+Zo maak je hem: Mollie Dashboard → **Developers** → **API keys** → *advanced access token* aanmaken (of direct via https://my.mollie.com/dashboard/developers/api-access-tokens). Vink het leesrecht voor **settlements** aan (en eventueel balances). Alleen een gebruiker met de rol **Admin** in Mollie kan dit. Het token begint met `access_`. Start de kassa daarna opnieuw en klik op de exportpagina op **Uitbetalingen ophalen bij Mollie**.
 
 ## Backups
 

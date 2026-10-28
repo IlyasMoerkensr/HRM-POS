@@ -188,7 +188,7 @@ export default async function ExportPage({ searchParams }: { searchParams: Promi
             <div className="mb-2"><MollieSyncButton from={period.from} /></div>
             {!orgToken && (
               <p className="mb-2 text-sm text-slate-500 print:hidden">
-                Voor uitbetalingen en kosten is een Mollie-organisatietoken nodig (MOLLIE_ORG_ACCESS_TOKEN in .env, recht “settlements.read”).
+                Voor uitbetalingen en kosten is een Mollie “advanced access token” nodig (Mollie Dashboard → Developers → API keys; zet hem als MOLLIE_ORG_ACCESS_TOKEN in .env, met leesrecht op settlements).
               </p>
             )}
             <table className="w-full text-sm">

@@ -58,7 +58,7 @@ export interface MollieConfig {
   testMode: boolean;
   /** Publieke basis-URL (https) voor webhooks. Leeg = alleen polling. */
   webhookBaseUrl: string | null;
-  /** Organisatie-token: nodig voor Settlements (uitbetalingen + kosten). */
+  /** Advanced access token (voorheen organisatie-token): nodig voor Settlements (uitbetalingen + kosten). */
   orgAccessToken: string | null;
 }
 
@@ -114,7 +114,7 @@ function organizationClient(): MollieClient {
   const { orgAccessToken } = getMollieConfig();
   if (!orgAccessToken) {
     throw new MollieNotConfiguredError(
-      'MOLLIE_ORG_ACCESS_TOKEN ontbreekt. Maak in het Mollie Dashboard een organisatie-token aan met recht "settlements.read" om uitbetalingen en kosten op te halen.',
+      'MOLLIE_ORG_ACCESS_TOKEN ontbreekt. Maak in het Mollie Dashboard (Developers → API keys) een “advanced access token” met leesrecht op settlements en zet die in .env.',
     );
   }
   if (!orgClient) orgClient = createMollieClient({ accessToken: orgAccessToken, apiEndpoint: apiEndpoint(), versionStrings });
