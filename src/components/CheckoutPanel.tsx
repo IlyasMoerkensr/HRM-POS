@@ -171,9 +171,9 @@ function CashTab({ state, busy, guard, setError, apply, onCashMovement, lastChan
   const change = tendered - cashPart;
   const rest = remaining - cashPart;
 
-  const pay = () =>
+  const pay = (tenderedCents: number) =>
     guard(async () => {
-      const r = await payCashAction({ orderId: state.orderId, tenderedCents: tendered, amountCents: null, idempotencyKey: key });
+      const r = await payCashAction({ orderId: state.orderId, tenderedCents, amountCents: null, idempotencyKey: key });
       if (!r.ok) return setError(r.error);
       setKey(newKey());
       setDigits('');
@@ -186,16 +186,18 @@ function CashTab({ state, busy, guard, setError, apply, onCashMovement, lastChan
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <div className="space-y-3">
+        {/* Eén tik: klant betaalt het bedrag gepast, niets invullen */}
+        <Button variant="success" size="xl" className="w-full" disabled={busy || remaining <= 0} onClick={() => pay(remaining)}>
+          Gepast betaald — {formatEUR(remaining)} boeken
+        </Button>
+        <p className="text-sm text-slate-500">Wisselgeld teruggeven? Kies of typ hieronder wat de klant geeft.</p>
         <div className="grid grid-cols-2 gap-2">
-          <Button variant="primary" size="lg" onClick={() => setDigits(String(remaining))} disabled={remaining <= 0}>
-            Gepast
-          </Button>
           {BILLS.map((b) => (
             <Button key={b} size="lg" onClick={() => setDigits(String(b))}>
               {formatEUR(b)}
             </Button>
           ))}
-          <Button size="lg" onClick={() => setDigits(String(tendered + 500))}>
+          <Button size="lg" className="col-span-2" onClick={() => setDigits(String(tendered + 500))}>
             + € 5
           </Button>
         </div>
@@ -218,8 +220,8 @@ function CashTab({ state, busy, guard, setError, apply, onCashMovement, lastChan
       </div>
       <div className="space-y-3">
         <NumPad value={digits} onChange={setDigits} />
-        <Button variant="success" size="xl" className="w-full" disabled={busy || tendered <= 0 || remaining <= 0} onClick={pay}>
-          {rest > 0 && tendered > 0 ? `${formatEUR(cashPart)} contant, rest pinnen` : 'Contant afrekenen'}
+        <Button variant="primary" size="xl" className="w-full" disabled={busy || tendered <= 0 || remaining <= 0} onClick={() => pay(tendered)}>
+          {rest > 0 && tendered > 0 ? `${formatEUR(cashPart)} contant, rest pinnen` : tendered > 0 ? `Afrekenen, ${formatEUR(change)} terug` : 'Contant afrekenen'}
         </Button>
         {state.pendingCents > 0 && <p className="text-sm text-slate-500">Er loopt nog een pinbetaling van {formatEUR(state.pendingCents)}.</p>}
       </div>
